@@ -693,8 +693,36 @@
     const lijst = events.sort((a, b) => a.datum.localeCompare(b.datum)).map(e => `• ${Uitvraag.datumTekst(e.datum)} ${e.start}–${e.eind}: ${e.naam}`).join('\n');
     const tot = events.map(e => e.uitvraag_tot).sort()[0];
     const tekst = `🎉 Nieuwe feesten in het zalencentrum!\n${lijst}\n\nOproepkrachten: geef vóór ${Uitvraag.datumTekst(tot)} in de app aan op welke datums je kunt:\n${siteUrl()}\n\nHet maakt niet uit wie het eerst reageert, het werk wordt eerlijk verdeeld.`;
-    return A.modal('Uitvraag delen via WhatsApp', `<p>De oproepkrachten hebben al een melding in de app gekregen. Wil je het ook in de WhatsApp-groep zetten?</p><textarea id="waTekst" rows="9">${esc(tekst)}</textarea>`,
-      [{ label: 'Niet nu', waarde: null }, { label: '💬 Open WhatsApp', soort: 'ok', waarde: bg => { window.open('https://wa.me/?text=' + encodeURIComponent(bg.querySelector('#waTekst').value), '_blank'); return true; } }]);
+    // Wie krijgt een pushmelding? Per oproepkracht de feesten waarvoor hij of zij gevraagd is.
+    const ontvangers = alleenGeen => {
+      const perMw = {};
+      for (const e of events) for (const m of G.uitvraagGroep(e, A.data)) {
+        if (alleenGeen && A.data.event_reacties.some(r => r.event_id === e.id && r.medewerker_id === m.id)) continue;
+        (perMw[m.id] = perMw[m.id] || []).push(e);
+      }
+      return perMw;
+    };
+    const nGeen = Object.keys(ontvangers(true)).length, nAlle = Object.keys(ontvangers(false)).length;
+    const pushHtml = `<div class="push-opnieuw">
+        <b>🔔 Nog een pushmelding sturen</b>
+        <label class="check"><input type="radio" name="pushWie" value="geen" ${nGeen ? 'checked' : 'disabled'}> Alleen wie nog niet heeft gereageerd <span class="zacht">(${nGeen})</span></label>
+        <label class="check"><input type="radio" name="pushWie" value="alle" ${nGeen ? '' : 'checked'}> Alle oproepkrachten die gevraagd zijn <span class="zacht">(${nAlle})</span></label>
+        <button class="knop primair" type="button" id="pushOpnieuw" ${nAlle ? '' : 'disabled'}>🔔 Pushmelding sturen</button></div>`;
+    return A.modal('Uitvraag delen', `${pushHtml}<p style="margin-top:1em">Of zet het in de WhatsApp-groep:</p><textarea id="waTekst" rows="8">${esc(tekst)}</textarea>`,
+      [{ label: 'Sluiten', waarde: null }, { label: '💬 Open WhatsApp', soort: 'ok', waarde: bg => { window.open('https://wa.me/?text=' + encodeURIComponent(bg.querySelector('#waTekst').value), '_blank'); return true; } }],
+      bg => {
+        const knop = bg.querySelector('#pushOpnieuw');
+        knop.onclick = () => A.bezig(knop, async () => {
+          const alleenGeen = bg.querySelector('input[name=pushWie]:checked').value === 'geen';
+          const perMw = ontvangers(alleenGeen);
+          for (const [mid, lijst] of Object.entries(perMw)) {
+            const eerste = lijst.map(x => x.uitvraag_tot).sort()[0];
+            const open = alleenGeen ? lijst : lijst.filter(x => !A.data.event_reacties.some(r => r.event_id === x.id && r.medewerker_id === mid));
+            await A.melding(mid, `⏰ ${open.length ? 'Kun jij werken? Je hebt nog niet gereageerd op' : 'Herinnering feesten in het zalencentrum:'} ` + (open.length ? open : lijst).map(x => `${A.datumKort(x.datum)} ${x.start}–${x.eind} (${x.naam})`).join('; ') + `. Geef het in de app aan bij "Kun jij op deze feesten?", graag vóór ${A.datumLang(eerste)}.`, { titel: 'Kun jij werken in het zalencentrum?' });
+          }
+          A.toast(`Pushmelding verstuurd naar ${Object.keys(perMw).length} oproepkracht(en)`, 'ok');
+        }).then(() => { knop.disabled = true; knop.textContent = '✓ Verstuurd'; });
+      });
   }
 
   // ---------- meerdere feesten in één keer, één bericht per oproepkracht ----------
