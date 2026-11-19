@@ -50,14 +50,13 @@ function vandaagNL() {
   await store.insert('roosters', { maand: volgende, status, gegenereerd_op: tijd, gepubliceerd_op: status === 'gepubliceerd' ? tijd : null, meldingen: res.meldingen });
   const [j, m] = volgende.split('-');
   const maandNaam = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'][+m - 1] + ' ' + j;
-  await store.insert('meldingen', { medewerker_id: null, tekst: `Het rooster voor ${maandNaam} is automatisch gemaakt${status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'}`, gelezen: false, tijd });
+  await store.insert('meldingen', { medewerker_id: null, tekst: `Het rooster voor ${maandNaam} is automatisch gemaakt${status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'}`, gelezen: false, tijd, titel: 'Nieuw rooster ' + maandNaam, link: '#rooster' });
   if (status === 'gepubliceerd') {
     data.diensten.push(...res.diensten);
     data.roosters.push({ maand: volgende, status });
     const rows = Uitvraag.roosterMeldingen(data, volgende, tijd);
     if (rows.length) await store.insert('meldingen', rows);
   }
-  await Uitvraag.push(ins, 'Nieuw rooster ' + maandNaam, status === 'concept' ? 'Het rooster is gemaakt. Controleer het en verstuur het naar het personeel.' : 'Het rooster is gemaakt en verstuurd.', '#rooster');
   console.log(`Klaar: ${res.diensten.length} diensten, ${res.diensten.filter(d => !d.medewerker_id).length} open.`);
   res.meldingen.forEach(x => console.log(' - ' + x));
 })().catch(e => { console.error(e); process.exit(1); });
