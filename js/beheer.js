@@ -662,6 +662,33 @@
     const st = uitvraagStand(e);
     return `<span class="label let" title="Reacties oproepkrachten">⏳ uitvraag t/m ${esc(A.datumKort(e.uitvraag_tot))} · ${st.kan} kan, ${st.kanNiet} niet, ${st.geen} geen reactie</span>`;
   }
+  // Duidelijk overzicht van een lopende uitvraag: kleur, balk "kan / nodig", per functie en wie wat zei.
+  function uitvraagOverzicht(e) {
+    const st = uitvraagStand(e);
+    const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
+    const kanMw = st.reac.filter(r => r.kan).map(r => A.mw(r.medewerker_id)).filter(Boolean);
+    const nietMw = st.reac.filter(r => !r.kan).map(r => A.mw(r.medewerker_id)).filter(Boolean);
+    const wachtMw = st.groep.filter(m => !st.reac.some(r => r.medewerker_id === m.id));
+    // per functie: hoeveel van de 'kan'-mensen kunnen die functie doen
+    const perFn = (e.bezetting || []).filter(b => +b.aantal > 0).map(b => ({ f: b.functie, nodig: +b.aantal, kan: kanMw.filter(m => (m.functies || []).includes(b.functie)).length }));
+    const fnTekort = perFn.some(x => x.kan < x.nodig);
+    const toestand = nodig && st.kan >= nodig && !fnTekort ? 'goed' : st.kan > 0 ? 'bijna' : wachtMw.length ? 'wacht' : 'slecht';
+    const kleur = { goed: 'var(--ok)', bijna: 'var(--let)', wacht: '#b3a898', slecht: 'var(--fout)' }[toestand];
+    const titel = { goed: '✓ Genoeg mensen', bijna: 'Nog ' + Math.max(nodig - st.kan, perFn.reduce((s, x) => s + Math.max(0, x.nodig - x.kan), 0)) + ' nodig', wacht: 'Wacht op reacties', slecht: 'Niemand kan' }[toestand];
+    const pct = nodig ? Math.min(100, Math.round(st.kan / nodig * 100)) : 0;
+    const namen = (lijst, cls, teken) => lijst.length ? `<span class="uv-namen ${cls}">${teken} ${lijst.map(m => esc(m.naam)).join(', ')}</span>` : '';
+    return {
+      toestand,
+      meta: `<div class="uv-fns">${perFn.map(x => `<span class="uv-fn ${x.kan >= x.nodig ? 'ok' : x.kan ? 'let' : 'fout'}">${esc(x.f)} <b>${x.kan}/${x.nodig}</b></span>`).join('')}</div>
+        <div class="uv-wie">${namen(kanMw, 'ok', '✓')}${namen(nietMw, 'fout', '✕')}${namen(wachtMw, 'wacht', '…')}</div>`,
+      rechts: `<div class="uv-blok ${toestand}">
+        <div class="uv-titel" style="color:${kleur}">${titel}</div>
+        <div class="uv-balk" title="${st.kan} van ${nodig} nodig"><i style="width:${pct}%;background:${kleur}"></i></div>
+        <div class="uv-tel"><span class="ok">✓ ${st.kan} kan</span><span class="fout">✕ ${st.kanNiet} niet</span><span class="wacht">… ${st.geen} wacht</span></div>
+        <div class="uv-tot">⏳ reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>`
+    };
+  }
+
   function deelUitvraagWhatsApp(events) {
     const lijst = events.sort((a, b) => a.datum.localeCompare(b.datum)).map(e => `• ${Uitvraag.datumTekst(e.datum)} ${e.start}–${e.eind}: ${e.naam}`).join('\n');
     const tot = events.map(e => e.uitvraag_tot).sort()[0];
@@ -788,11 +815,14 @@
         <button class="knop" id="nieuwEvs">+ Meerdere feesten</button>
         <button class="knop primair" id="nieuwEv">+ Feest toevoegen</button></div></div>
       <p class="zacht">Zet hier alle feesten in. Met <b>uitvraag</b> krijgen de oproepkrachten een melding en ${esc(A.data.instellingen.uitvraag_dagen || 7)} dagen om te laten weten of ze kunnen. Daarna wordt het feest automatisch ingepland: eerst vast personeel (tot hun contracturen), daarna de oproepkrachten eerlijk verdeeld.</p>
+      <p class="zacht uv-legenda"><span class="uv-fn ok">groen</span> genoeg oproepkrachten kunnen · <span class="uv-fn let">oranje</span> nog mensen nodig · <span class="uv-fn fout">rood</span> niemand kan · grijs: nog geen reacties. <span style="opacity:.8">(Vast personeel komt daar bij het inplannen nog bij.)</span></p>
       ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${A.rooster(m) ? `<span class="label ${A.isGepubliceerd(m) ? 'ok' : 'let'}">rooster ${A.isGepubliceerd(m) ? "verstuurd" : "concept"}</span>` : '<span class="label">nog geen maandrooster</span>'}</div>
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
-          const status = e.status === 'open' ? uitvraagLabel(e) : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
-          return `<div class="item klik" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+          const uv = e.status === 'open' ? uitvraagOverzicht(e) : null;
+          const status = uv ? uv.rechts : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
+          return `<div class="item klik ${uv ? 'uv uv-' + uv.toestand : ''}" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
           <div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten${e.zaal ? ' · ' + esc(e.zaal) : ''} · ${(e.bezetting || []).map(b => b.aantal + '× ' + esc(b.functie)).join(', ') || '<span style="color:var(--fout)">geen bezetting opgegeven</span>'}</div>
+          ${uv ? uv.meta : ''}
           ${ds.filter(x => x.medewerker_id).length ? `<div class="meta">👥 ${ds.filter(x => x.medewerker_id).map(x => esc(A.mwNaam(x.medewerker_id))).join(', ')}</div>` : ''}</div>
           <div class="rechts">${status}</div></div>`; }).join('')}</div>`).join('')
         : `<div class="paneel"><div class="leeg"><span class="groot">🎉</span>${staat.zalenVerleden ? 'Geen afgelopen feesten' : 'Nog geen feesten gepland'}</div></div>`}
