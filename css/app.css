@@ -292,3 +292,13 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .merk small { padding-left: .2em; }
 .kop-logo { display: block; height: 42px; width: auto; margin-bottom: .45em; }
 .mobiel-logo { width: 28px; height: 28px; border-radius: 7px; margin-right: .5em; vertical-align: middle; }
+
+/* ---------- bezetting feesten ---------- */
+.regel-kop, .regel-rij { display: grid; grid-template-columns: minmax(0,1.6fr) repeat(3, minmax(0,1fr)) auto; gap: .4em; align-items: center; }
+.regel-kop { font-size: .75rem; font-weight: 700; color: var(--zacht); margin-bottom: .3em; }
+.regel-rij { margin-bottom: .4em; }
+.mf-bez { display: flex; flex-wrap: wrap; align-items: center; gap: .2em .6em; }
+.mf-fns { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .4em; margin: .3em 0 .3em; padding: .6em; background: var(--zaal-licht); border-radius: 8px; }
+.mf-fns.verborgen { display: none !important; }
+.mf-fn { display: flex; align-items: center; justify-content: space-between; gap: .4em; margin: 0; font-size: .82rem; color: var(--inkt); }
+.mf-fn input { width: 58px; padding: .3em .4em; text-align: center; }
