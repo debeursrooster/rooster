@@ -136,7 +136,8 @@
     else if (status === 'demo') push = `<div class="push-blok"><b>🔔 Meldingen</b><p class="zacht" style="margin:0">Werkt pas als de app aan de database gekoppeld is (niet in demo-modus).</p></div>`;
     else if (status === 'geen-sleutel') push = `<div class="push-blok"><b>🔔 Meldingen</b><p class="zacht" style="margin:0">Vul <code>VAPID_PUBLIC_KEY</code> in bij <code>js/config.js</code>.</p></div>`;
 
-    if (o.compact && !install && (status === 'aan' || !push)) { el.innerHTML = ''; return; }
+    if (o.verbergAlsAan && status === 'aan') push = '';
+    if ((o.compact || o.verbergAlsAan) && !install && (status === 'aan' || !push)) { el.innerHTML = ''; return; }
     el.innerHTML = `<div class="paneel push-paneel">${o.compact ? '<button class="icoon push-weg" data-push="later" aria-label="Later">✕</button>' : ''}${install}${push}</div>`;
 
     const knop = n => el.querySelector('[data-push="' + n + '"]');

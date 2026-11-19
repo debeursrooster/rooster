@@ -44,7 +44,7 @@
   const testPush = () => A.melding(ik.id, '🔔 Meldingen staan aan! Je krijgt hier voortaan bericht over je rooster, ruilverzoeken en feesten.', { titel: 'Meldingen werken' });
   const pushOpties = compact => ({ rol: 'personeel', medewerkerId: ik.id, compact, onTest: testPush });
   function tekenPush() {
-    const md = $('#mdPush'); if (md) Push.paneel(md, pushOpties(false));
+    const md = $('#mdPush'); if (md) Push.paneel(md, { ...pushOpties(false), verbergAlsAan: true });   // staat het aan: niets tonen, dan kan niemand het per ongeluk uitzetten
     const mp = $('#mPush'); if (mp && !Push.later('personeel')) Push.paneel(mp, pushOpties(true));
   }
 
@@ -429,10 +429,52 @@
   }
 
   // ---------------- meldingen ----------------
+  // Naar links vegen toont een prullenbak; tikken op de prullenbak verwijdert de melding.
+  function veegLijst(lijst, verwijder) {
+    if (!lijst) return;
+    const OPEN = -84;
+    let open = null;
+    const zet = (rij, x, anim) => { const i = rij.querySelector('.veeg-inhoud'); i.style.transition = anim ? 'transform .18s ease' : 'none'; i.style.transform = x ? `translateX(${x}px)` : ''; rij.classList.toggle('open', x <= OPEN); };
+    lijst.querySelectorAll('.veeg').forEach(rij => {
+      const inhoud = rij.querySelector('.veeg-inhoud');
+      let x0 = 0, y0 = 0, dx = 0, start = 0, richting = null;
+      inhoud.addEventListener('pointerdown', e => {
+        if (open && open !== rij) { zet(open, 0, true); open = null; }
+        x0 = e.clientX; y0 = e.clientY; dx = 0; richting = null; start = rij.classList.contains('open') ? OPEN : 0;
+        inhoud.setPointerCapture && inhoud.setPointerCapture(e.pointerId);
+      });
+      inhoud.addEventListener('pointermove', e => {
+        if (!e.buttons && e.pointerType === 'mouse') return;
+        const ddx = e.clientX - x0, ddy = e.clientY - y0;
+        if (!richting && (Math.abs(ddx) > 8 || Math.abs(ddy) > 8)) richting = Math.abs(ddx) > Math.abs(ddy) ? 'x' : 'y';
+        if (richting !== 'x') return;
+        dx = ddx; zet(rij, Math.min(0, Math.max(OPEN - 30, start + dx)), false);
+      });
+      const eind = () => {
+        if (richting !== 'x') { if (start && !dx) { zet(rij, 0, true); open = null; } return; }
+        const nieuw = start + dx < OPEN / 2 ? OPEN : 0;
+        zet(rij, nieuw, true); open = nieuw ? rij : null;
+      };
+      inhoud.addEventListener('pointerup', eind);
+      inhoud.addEventListener('pointercancel', eind);
+      rij.querySelector('.veeg-weg').onclick = async () => {
+        rij.classList.add('weg');
+        try { await verwijder(rij.dataset.id); setTimeout(() => rij.remove(), 200); }
+        catch (x) { rij.classList.remove('weg'); zet(rij, 0, true); A.toast('Verwijderen lukte niet', 'fout'); }
+      };
+    });
+  }
   async function toonMeldingen() {
     const lijst = A.data.meldingen.filter(m => m.medewerker_id === ik.id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 30);
-    A.modal('Meldingen', `<div id="mdPush"></div><div class="melding-lijst">${lijst.length ? lijst.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}</div>`);
+    const leeg = '<div class="leeg">Geen meldingen</div>';
+    A.modal('Meldingen', `<div id="mdPush"></div><div class="melding-lijst" id="mdLijst">${lijst.length ? '<p class="zacht veeg-tip">Veeg een melding naar links om te verwijderen.</p>' + lijst.map(m => `<div class="veeg" data-id="${esc(m.id)}"><button class="veeg-weg" type="button" aria-label="Verwijderen">🗑️</button>
+      <div class="item veeg-inhoud ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div></div>`).join('') : leeg}</div>`);
     tekenPush();
+    veegLijst($('#mdLijst'), async id => {
+      await Store.remove('meldingen', id);
+      A.data.meldingen = A.data.meldingen.filter(m => m.id !== id);
+      if (!$('#mdLijst .veeg')) $('#mdLijst').innerHTML = leeg;
+    });
     const ongelezen = lijst.filter(m => !m.gelezen);
     for (const m of ongelezen) await Store.update('meldingen', m.id, { gelezen: true });
     if (ongelezen.length) { await A.reload(); ik = A.mw(ik.id); $('#belBadge').classList.add('verborgen'); }
