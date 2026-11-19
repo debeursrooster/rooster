@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roosterbeheer</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+</head>
+<body>
+  <div id="demoBand" class="demo-band verborgen">Demo-modus: gegevens staan alleen in deze browser. <button id="demoReset">Demo opnieuw beginnen</button></div>
+
+  <div id="login" class="login verborgen">
+    <form class="login-kaart" id="loginForm">
+      <div class="logo">📅</div>
+      <h1 id="loginNaam">Roosterbeheer</h1>
+      <p class="zacht">Vul de beheercode in</p>
+      <div class="pin-invoer"><input id="adminPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" style="width:180px;letter-spacing:.4em"></div>
+      <button class="knop primair" style="width:100%;justify-content:center">Inloggen</button>
+      <p class="zacht" style="margin-top:1em;font-size:.85rem"><a href="index.html">Naar de personeelspagina</a></p>
+    </form>
+  </div>
+
+  <div id="beheer" class="beheer verborgen">
+    <aside class="zijbalk" id="zijbalk">
+      <div class="merk"><div class="logo">📅</div><div><b id="bedrijfsnaam">Roosterbeheer</b><small>Beheer</small></div></div>
+      <nav class="nav" id="nav">
+        <a href="#overzicht" data-p="overzicht">🏠 Overzicht</a>
+        <a href="#rooster" data-p="rooster">📅 Rooster</a>
+        <a href="#aanvragen" data-p="aanvragen">✋ Aanvragen <span class="tel verborgen" id="telAanvragen"></span></a>
+        <a href="#zalen" data-p="zalen">🎉 Zalencentrum</a>
+        <a href="#cafetaria" data-p="cafetaria">🍟 Cafetaria</a>
+        <a href="#personeel" data-p="personeel">👥 Personeel</a>
+        <a href="#verzuim" data-p="verzuim">🤒 Verzuim</a>
+        <a href="#prikbord" data-p="prikbord">📌 Prikbord</a>
+        <a href="#instellingen" data-p="instellingen">⚙️ Instellingen</a>
+      </nav>
+      <div class="onder"><a href="index.html" target="_blank">Personeelspagina openen ↗</a><br><a href="#" id="uitloggen">Uitloggen</a></div>
+    </aside>
+    <div>
+      <div class="mobiel-kop"><button class="icoon" id="menuKnop" aria-label="Menu">☰</button><b id="mobielTitel">Roosterbeheer</b></div>
+      <main class="hoofd" id="hoofd"></main>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/generator.js"></script>
+  <script src="js/uitvraag.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/beheer.js"></script>
+</body>
+</html>
