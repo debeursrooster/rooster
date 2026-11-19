@@ -9,17 +9,17 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Beheer">
   <link rel="manifest" href="manifest-beheer.json">
-  <link rel="stylesheet" href="css/app.css?v=3">
+  <link rel="stylesheet" href="css/app.css?v=4">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
   <div id="demoBand" class="demo-band verborgen">Demo-modus: gegevens staan alleen in deze browser. <button id="demoReset">Demo opnieuw beginnen</button></div>
 
   <div id="login" class="login verborgen">
     <form class="login-kaart" id="loginForm">
-      <div class="logo">📅</div>
-      <h1 id="loginNaam">Roosterbeheer</h1>
+      <img class="login-logo" src="logo-licht.svg" alt="Anytyme De Beurs – Rooster">
+      <h1 id="loginNaam" class="verborgen">Roosterbeheer</h1>
       <p class="zacht">Vul de beheercode in</p>
       <div class="pin-invoer"><input id="adminPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" style="width:180px;letter-spacing:.4em"></div>
       <button class="knop primair" style="width:100%;justify-content:center">Inloggen</button>
@@ -29,7 +29,7 @@
 
   <div id="beheer" class="beheer verborgen">
     <aside class="zijbalk" id="zijbalk">
-      <div class="merk"><div class="logo">📅</div><div><b id="bedrijfsnaam">Roosterbeheer</b><small>Beheer</small></div></div>
+      <div class="merk"><img class="merk-logo" src="logo-donker.svg" alt="Anytyme De Beurs – Rooster"><b id="bedrijfsnaam" class="verborgen">Roosterbeheer</b><small>Beheer</small></div>
       <nav class="nav" id="nav">
         <a href="#overzicht" data-p="overzicht">🏠 Overzicht</a>
         <a href="#rooster" data-p="rooster">📅 Rooster</a>
@@ -44,17 +44,17 @@
       <div class="onder"><a href="index.html" target="_blank">Personeelspagina openen ↗</a><br><a href="#" id="uitloggen">Uitloggen</a></div>
     </aside>
     <div>
-      <div class="mobiel-kop"><button class="icoon" id="menuKnop" aria-label="Menu">☰</button><b id="mobielTitel">Roosterbeheer</b></div>
+      <div class="mobiel-kop"><button class="icoon" id="menuKnop" aria-label="Menu">☰</button><img class="mobiel-logo" src="icon.svg" alt=""><b id="mobielTitel">Roosterbeheer</b></div>
       <main class="hoofd" id="hoofd"></main>
     </div>
   </div>
 
-  <script src="js/config.js?v=3"></script>
-  <script src="js/store.js?v=3"></script>
-  <script src="js/generator.js?v=3"></script>
-  <script src="js/uitvraag.js?v=3"></script>
-  <script src="js/push.js?v=3"></script>
-  <script src="js/common.js?v=3"></script>
-  <script src="js/beheer.js?v=3"></script>
+  <script src="js/config.js?v=4"></script>
+  <script src="js/store.js?v=4"></script>
+  <script src="js/generator.js?v=4"></script>
+  <script src="js/uitvraag.js?v=4"></script>
+  <script src="js/push.js?v=4"></script>
+  <script src="js/common.js?v=4"></script>
+  <script src="js/beheer.js?v=4"></script>
 </body>
 </html>

@@ -8,18 +8,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Rooster">
   <title>Mijn rooster</title>
-  <link rel="stylesheet" href="css/app.css?v=3">
+  <link rel="stylesheet" href="css/app.css?v=4">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
   <div id="demoBand" class="demo-band verborgen">Demo-modus: probeer in te loggen als bijvoorbeeld Sandra (PIN 1111) of Mark (PIN 2222).</div>
 
   <div id="login" class="login verborgen">
     <div class="login-kaart">
-      <div class="logo">📅</div>
-      <h1 id="loginBedrijf">Rooster</h1>
+      <img class="login-logo" src="logo-licht.svg" alt="Anytyme De Beurs – Rooster">
+      <h1 id="loginBedrijf" class="verborgen">Rooster</h1>
       <div id="stapNaam"><p class="zacht">Wie ben jij?</p><div class="namen" id="namen"></div></div>
       <form id="stapPin" class="verborgen">
         <p>Hoi <b id="pinNaam"></b>, vul je code in</p>
@@ -34,7 +34,7 @@
   <div id="app" class="app verborgen">
     <header class="app-kop">
       <div class="bovenrij">
-        <div style="flex:1"><small id="kopBedrijf"></small><h1 id="kopNaam"></h1></div>
+        <div style="flex:1"><img class="kop-logo" src="logo-donker.svg" alt="Anytyme De Beurs – Rooster"><small id="kopBedrijf" class="verborgen"></small><h1 id="kopNaam"></h1></div>
         <button class="icoon" id="belKnop" aria-label="Meldingen">🔔<span class="badge verborgen" id="belBadge"></span></button>
         <button class="icoon" id="uitKnop" aria-label="Uitloggen" title="Uitloggen">⎋</button>
       </div>
@@ -50,12 +50,12 @@
     </div></nav>
   </div>
 
-  <script src="js/config.js?v=3"></script>
-  <script src="js/store.js?v=3"></script>
-  <script src="js/generator.js?v=3"></script>
-  <script src="js/uitvraag.js?v=3"></script>
-  <script src="js/push.js?v=3"></script>
-  <script src="js/common.js?v=3"></script>
-  <script src="js/personeel.js?v=3"></script>
+  <script src="js/config.js?v=4"></script>
+  <script src="js/store.js?v=4"></script>
+  <script src="js/generator.js?v=4"></script>
+  <script src="js/uitvraag.js?v=4"></script>
+  <script src="js/push.js?v=4"></script>
+  <script src="js/common.js?v=4"></script>
+  <script src="js/personeel.js?v=4"></script>
 </body>
 </html>
