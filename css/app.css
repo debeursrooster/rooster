@@ -310,3 +310,25 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .veeg .veeg-weg { position: absolute; top: 0; right: 0; bottom: 0; width: 84px; border: 0; background: var(--fout); color: #fff; font-size: 1.4rem; cursor: pointer; }
 .veeg.weg { max-height: 0; opacity: 0; }
 .veeg-tip { font-size: .8rem; margin: 0 0 .3em; }
+
+/* ---------- uitvraag zalencentrum: in één oogopslag ---------- */
+.item.uv { border-left: 5px solid #d9d0c2; padding-left: .7em; margin-left: -.2em; border-radius: 4px; }
+.item.uv-goed { border-left-color: var(--ok); background: linear-gradient(90deg, var(--ok-licht), transparent 45%); }
+.item.uv-bijna { border-left-color: var(--let); background: linear-gradient(90deg, var(--let-licht), transparent 45%); }
+.item.uv-slecht { border-left-color: var(--fout); background: linear-gradient(90deg, var(--fout-licht), transparent 45%); }
+.uv-fns { display: flex; flex-wrap: wrap; gap: .3em; margin-top: .35em; }
+.uv-fn { font-size: .78rem; padding: .12em .55em; border-radius: 99px; border: 1px solid; white-space: nowrap; }
+.uv-fn.ok { color: var(--ok); border-color: #b9e0c9; background: var(--ok-licht); }
+.uv-fn.let { color: #8a6508; border-color: #ecd9a0; background: var(--let-licht); }
+.uv-fn.fout { color: var(--fout); border-color: #efc0c0; background: var(--fout-licht); }
+.uv-wie { display: flex; flex-wrap: wrap; gap: .2em .9em; margin-top: .3em; font-size: .8rem; }
+.uv-namen.ok { color: var(--ok); } .uv-namen.fout { color: var(--fout); } .uv-namen.wacht { color: var(--zacht); }
+.uv-blok { min-width: 190px; text-align: right; }
+.uv-titel { font-weight: 800; font-size: .95rem; }
+.uv-balk { height: 8px; background: #eee6da; border-radius: 99px; overflow: hidden; margin: .35em 0 .3em; }
+.uv-balk i { display: block; height: 100%; border-radius: 99px; transition: width .3s; }
+.uv-tel { display: flex; justify-content: flex-end; gap: .6em; font-size: .78rem; font-weight: 700; }
+.uv-tel .ok { color: var(--ok); } .uv-tel .fout { color: var(--fout); } .uv-tel .wacht { color: var(--zacht); }
+.uv-tot { font-size: .74rem; color: var(--zacht); margin-top: .15em; }
+@media (max-width: 700px) { .item.uv { flex-wrap: wrap; } .item.uv > div:nth-child(2) { flex: 1 1 0; min-width: 0; } .item.uv .rechts { flex-basis: 100%; } .uv-blok { text-align: left; min-width: 0; width: 100%; } .uv-tel { justify-content: flex-start; } }
+.uv-legenda { font-size: .82rem; margin-top: -.4em; } .uv-legenda .uv-fn { font-size: .74rem; }
