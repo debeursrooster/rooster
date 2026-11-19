@@ -34,7 +34,6 @@
     return App.isGepubliceerd(d.maand);
   };
   App.eventZichtbaar = e => !!e && (e.status === 'ingepland' || (!e.status && App.isGepubliceerd(e.datum.slice(0, 7))));
-  App.push = (titel, tekst, link) => Uitvraag.push(App.data.instellingen, titel, tekst, link);
   // Rooster versturen: persoonlijke melding voor wie is ingeroosterd
   App.meldRooster = async maand => {
     const rows = Uitvraag.roosterMeldingen(App.data, maand);
@@ -51,8 +50,13 @@
     return App.data;
   };
 
-  App.melding = (medewerker_id, tekst) =>
-    Store.insert('meldingen', { medewerker_id: medewerker_id || null, tekst, gelezen: false, tijd: new Date().toISOString() });
+  // Elke melding gaat ook als pushbericht naar de telefoon (via Supabase). extra = { titel, link }
+  App.melding = (medewerker_id, tekst, extra) => {
+    const rij = { medewerker_id: medewerker_id || null, tekst, gelezen: false, tijd: new Date().toISOString() };
+    if (extra && extra.titel) rij.titel = extra.titel;
+    if (extra && extra.link) rij.link = extra.link;
+    return Store.insert('meldingen', rij);
+  };
 
   // ---------- UI ----------
   App.toast = function (tekst, soort) {
@@ -166,10 +170,9 @@
     await Store.insert('diensten', res.diensten);
     const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
     await Store.insert('roosters', { maand: volgende, status, gegenereerd_op: new Date().toISOString(), gepubliceerd_op: status === 'gepubliceerd' ? new Date().toISOString() : null, meldingen: res.meldingen });
-    await App.melding(null, 'Het rooster voor ' + App.maandNaam(volgende) + ' is automatisch gemaakt' + (status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'));
+    await App.melding(null, 'Het rooster voor ' + App.maandNaam(volgende) + ' is automatisch gemaakt' + (status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'), { titel: 'Nieuw rooster ' + App.maandNaam(volgende), link: '#rooster' });
     await App.reload();
     if (status === 'gepubliceerd') await App.meldRooster(volgende);
-    await App.push('Nieuw rooster ' + App.maandNaam(volgende), status === 'concept' ? 'Het rooster is gemaakt. Controleer het en verstuur het naar het personeel.' : 'Het rooster is gemaakt en verstuurd.', '#rooster');
     await App.reload();
     return volgende;
   };

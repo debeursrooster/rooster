@@ -39,8 +39,16 @@
   };
   $('#menuKnop').onclick = () => $('#zijbalk').classList.toggle('open');
 
+  // Testmelding voor de beheerder: gaat via de database, net als alle echte meldingen
+  const testBeheer = () => A.melding(null, '🔔 Testmelding: meldingen voor het beheer werken op dit apparaat.', { titel: 'Test roosterapp', link: '#instellingen' });
+
   async function toonBeheer() {
     $('#beheer').classList.remove('verborgen');
+    Push.vernieuw('beheer');
+    Push.opWijziging(() => {
+      if ($('#iPush')) Push.paneel($('#iPush'), { rol: 'beheer', onTest: testBeheer });
+      if ($('#oPush') && !Push.later('beheer')) Push.paneel($('#oPush'), { rol: 'beheer', compact: true, onTest: testBeheer });
+    });
     $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam;
     const uv = await A.verwerkUitvragen();
     if (uv.ingepland.length) A.toast('Uitvraag afgerond: ' + uv.ingepland.join(', ') + (uv.teControleren ? ' – controleer en verstuur' : ' ingepland'), 'ok');
@@ -111,6 +119,7 @@
     const evConcept = d.zalen_events.filter(e => e.status === 'concept');
     if (evConcept.length) teControleren.push(`<a class="knop ok" href="#zalen">🎉 ${evConcept.length} feest${evConcept.length > 1 ? 'en' : ''}</a>`);
     hoofd.innerHTML = `
+      <div id="oPush"></div>
       ${teControleren.length ? `<div class="statusbalk concept" style="margin-bottom:1.2em">🔔 <div><b>Klaar om te controleren en te versturen:</b> het personeel ziet dit pas na versturen.</div><div class="acties">${teControleren.join('')}</div></div>` : ''}
       <div class="kop"><div><h1>Goedendag 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
         <div class="acties"><a class="knop" href="#zalen">+ Feest toevoegen</a><a class="knop primair" href="#rooster">Rooster bekijken</a></div></div>
@@ -143,6 +152,7 @@
       for (const m of d.meldingen.filter(m => !m.medewerker_id && !m.gelezen)) await Store.update('meldingen', m.id, { gelezen: true });
       await herlaad(); pOverzicht();
     });
+    if (!Push.later('beheer')) Push.paneel($('#oPush'), { rol: 'beheer', compact: true, onTest: testBeheer });
   }
 
   // =====================================================================
@@ -1148,11 +1158,8 @@
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
         <label class="check"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
         <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
-      <div class="paneel"><h3>📲 Meldingen op je telefoon</h3>
-        <p class="zacht">Krijg een pushbericht als er een rooster of feest klaarstaat om te controleren, iemand vrij vraagt of een ruil goedgekeurd moet worden. Gratis via de app <b>ntfy</b> (Android en iPhone).</p>
-        <ol class="zacht" style="font-size:.9rem;padding-left:1.2em;margin-top:0"><li>Installeer de app <b>ntfy</b> uit de Play Store of App Store.</li><li>Tik op <b>+</b> en abonneer je op het onderwerp hieronder (verzin iets unieks, zoals een wachtwoord).</li><li>Vul hetzelfde onderwerp hier in, sla op en klik op <i>Testbericht</i>.</li></ol>
-        <div style="display:flex;gap:.5em;max-width:480px"><input id="iNtfy" value="${esc(s.ntfy_topic || '')}" placeholder="bv. debeurs-rooster-7k2q9"><button class="knop" id="iNtfyGen" type="button" title="Willekeurig onderwerp maken">🎲</button><button class="knop" id="iNtfyTest" type="button">Testbericht</button></div>
-        ${s.site_url ? '' : '<p class="zacht" style="font-size:.85rem;margin:.6em 0 0">Tip: vul hierboven ook het adres van de personeelspagina in, dan opent een tik op het bericht meteen het beheer.</p>'}</div>
+      <div class="paneel" style="padding:0;border:0;background:none;box-shadow:none"><h3 style="margin:.2em 0 .6em">📲 App en meldingen op je telefoon</h3><div id="iPush"></div>
+        <p class="zacht" style="font-size:.85rem;margin:.4em 0 0">Zet dit aan op elk apparaat waarop je meldingen wilt krijgen. Het personeel zet het zelf aan op hun eigen telefoon (knop op de personeelspagina en onder het belletje).</p></div>
       <div style="display:flex;gap:.5em;flex-wrap:wrap"><button class="knop primair" id="iOpslaan">Opslaan</button><button class="knop" id="iBackup">⬇ Back-up downloaden</button></div>`;
     hoofd.querySelectorAll('[data-fweg]').forEach(b => b.onclick = async () => {
       const f = b.dataset.fweg;
@@ -1166,15 +1173,10 @@
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      await Store.update('instellingen', 1, { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, uitvraag_dagen: +$('#iUitvraag').value || 7, ntfy_topic: $('#iNtfy').value.trim(), beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() });
+      await Store.update('instellingen', 1, { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() });
       await herlaad(); $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam; A.toast('Instellingen opgeslagen', 'ok'); pInstellingen();
     });
-    $('#iNtfyGen').onclick = () => { $('#iNtfy').value = (A.data.instellingen.bedrijfsnaam || 'rooster').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(-20) + '-' + Math.random().toString(36).slice(2, 8); };
-    $('#iNtfyTest').onclick = e => A.bezig(e.target, async () => {
-      const t = $('#iNtfy').value.trim(); if (!t) return A.toast('Vul eerst een onderwerp in', 'fout');
-      const ok = await Uitvraag.push({ ...A.data.instellingen, ntfy_topic: t }, 'Test roosterapp', 'Het werkt! Je krijgt hier voortaan meldingen van het rooster.');
-      A.toast(ok ? 'Testbericht verstuurd – kijk op je telefoon' : 'Versturen mislukt', ok ? 'ok' : 'fout');
-    });
+    Push.paneel($('#iPush'), { rol: 'beheer', onTest: testBeheer });
     $('#iBackup').onclick = () => A.download('rooster-backup-' + G.today() + '.json', JSON.stringify(A.data, null, 2), 'application/json');
   }
 

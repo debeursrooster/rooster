@@ -15,19 +15,6 @@
   U.maandNaam = maandNaam;
   const uren = n => String(Math.round(n * 4) / 4).replace('.', ',');
 
-  // ---------- push-bericht naar de telefoon van de beheerder (gratis via ntfy.sh) ----------
-  U.push = async function (instellingen, titel, tekst, link) {
-    const topic = instellingen && (instellingen.ntfy_topic || '').trim();
-    if (!topic) return false;
-    try {
-      const headers = { Title: titel.replace(/[^\x20-\x7E]/g, ''), Tags: 'calendar' };
-      const site = (instellingen.site_url || '').replace(/index\.html.*$/, '').replace(/\/?$/, '/');
-      if (link !== false && instellingen.site_url) headers.Click = site + 'beheer.html' + (link || '');
-      await fetch('https://ntfy.sh/' + encodeURIComponent(topic), { method: 'POST', body: tekst, headers });
-      return true;
-    } catch (e) { return false; }
-  };
-
   // Persoonlijke meldingen bij het versturen van een maandrooster: alleen wie is ingeroosterd
   U.roosterMeldingen = function (data, maand, tijd) {
     const perMw = {};
@@ -84,7 +71,7 @@
     opties = opties || {};
     vandaag = vandaag || G.today();
     const nu = new Date().toISOString();
-    const melding = (mid, tekst) => ({ medewerker_id: mid || null, tekst, gelezen: false, tijd: nu });
+    const melding = (mid, tekst, extra) => ({ medewerker_id: mid || null, tekst, gelezen: false, tijd: nu, ...(extra || {}) });
     const reacties = data.event_reacties || [];
     const uit = { herinnerd: 0, ingepland: [], open: 0 };
     const nieuweMeldingen = [];
@@ -120,12 +107,11 @@
       const lijst = klaar.map(e => e.naam + ' (' + datumTekst(e.datum) + ')').join(', ');
       if (ins.auto_publiceren) {
         await U.publiceerEvents(store, data, klaar);
-        nieuweMeldingen.push(melding(null, `Uitvraag afgerond, ingepland en verstuurd: ${lijst}.` + (open.length ? ` Let op: ${open.length} dienst(en) nog open.` : '')));
+        nieuweMeldingen.push(melding(null, `Uitvraag afgerond, ingepland en verstuurd: ${lijst}.` + (open.length ? ` Let op: ${open.length} dienst(en) nog open.` : ''), { titel: 'Feesten ingepland', link: '#zalen' }));
       } else {
-        nieuweMeldingen.push(melding(null, `Uitvraag afgerond: ${lijst} ${klaar.length > 1 ? 'zijn' : 'is'} ingepland en ${klaar.length > 1 ? 'staan' : 'staat'} klaar om te controleren en te versturen.` + (open.length ? ` Let op: ${open.length} dienst(en) nog open.` : '')));
+        nieuweMeldingen.push(melding(null, `Uitvraag afgerond: ${lijst} ${klaar.length > 1 ? 'zijn' : 'is'} ingepland en ${klaar.length > 1 ? 'staan' : 'staat'} klaar om te controleren en te versturen.` + (open.length ? ` Let op: ${open.length} dienst(en) nog open.` : ''), { titel: 'Feesten ingepland', link: '#zalen' }));
         uit.teControleren = true;
       }
-      await U.push(ins, 'Feesten ingepland', `${lijst}` + (ins.auto_publiceren ? ' - verstuurd naar personeel.' : ' - controleer en verstuur het rooster.') + (open.length ? ` ${open.length} dienst(en) nog open.` : ''), '#zalen');
     }
     if (nieuweMeldingen.length) await store.insert('meldingen', nieuweMeldingen);
     return uit;

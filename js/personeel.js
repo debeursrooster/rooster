@@ -38,7 +38,15 @@
       $('#login').classList.add('verborgen'); toonApp();
     } else { A.toast('Code klopt niet', 'fout'); $('#pin').value = ''; }
   };
-  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat?', 'Uitloggen')) { localStorage.removeItem('rooster_mw'); location.reload(); } };
+  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat? Je krijgt hier dan ook geen meldingen meer.', 'Uitloggen')) { await Push.uitzetten('personeel'); localStorage.removeItem('rooster_mw'); location.reload(); } };
+
+  // ---------------- app & pushmeldingen ----------------
+  const testPush = () => A.melding(ik.id, '🔔 Meldingen staan aan! Je krijgt hier voortaan bericht over je rooster, ruilverzoeken en feesten.', { titel: 'Meldingen werken' });
+  const pushOpties = compact => ({ rol: 'personeel', medewerkerId: ik.id, compact, onTest: testPush });
+  function tekenPush() {
+    const md = $('#mdPush'); if (md) Push.paneel(md, pushOpties(false));
+    const mp = $('#mPush'); if (mp && !Push.later('personeel')) Push.paneel(mp, pushOpties(true));
+  }
 
   // ---------------- app ----------------
   function toonApp() {
@@ -46,6 +54,8 @@
     $('#kopNaam').textContent = 'Hoi ' + ik.naam + '!';
     $('#onderbalk').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; teken(); window.scrollTo(0, 0); });
     $('#belKnop').onclick = toonMeldingen;
+    Push.vernieuw('personeel', ik.id);
+    Push.opWijziging(tekenPush);
     teken();
     // regelmatig verversen
     document.addEventListener('visibilitychange', () => { if (!document.hidden) ververs(); });
@@ -125,6 +135,7 @@
         <div class="rechts" style="gap:.3em"><button class="knop klein ${r && r.kan ? 'ok' : ''}" data-reac="${e.id}" data-kan="1">${r && r.kan ? '✓ ' : ''}Ik kan</button><button class="knop klein ${r && !r.kan ? 'primair' : ''}" data-reac="${e.id}" data-kan="0">${r && !r.kan ? '✕ ' : ''}Kan niet</button></div></div>`; };
     const ziek = mijnZiek();
     $('#inhoud').innerHTML = `
+      <div id="mPush"></div>
       ${ziek ? `<div class="paneel" style="border:2px solid var(--fout-licht)"><div class="paneel-kop"><h3>🤒 Je bent ziek gemeld</h3><button class="knop klein ok" id="beterKnop">Ik ben weer beter</button></div>
         <p class="zacht" style="margin:0">Sinds ${esc(A.datumLang(ziek.van))}${ziek.status === 'gemeld' ? ` · nog niet bevestigd door ${esc(A.data.instellingen.beheer_naam || 'de baas')}` : ''}. Beterschap!</p></div>`
         : `<button class="knop" id="ziekKnop" style="width:100%;justify-content:center;margin-bottom:1em;border-color:var(--fout);color:var(--fout);background:#fff">🤒 Ziek melden</button>`}
@@ -139,6 +150,7 @@
           : '<div class="leeg"><span class="groot">🛋️</span>Geen diensten gepland</div>'}
       </div>`;
     koppelActies();
+    tekenPush();
     if ($('#ziekKnop')) $('#ziekKnop').onclick = ziekMelden;
     if ($('#beterKnop')) $('#beterKnop').onclick = beterMelden;
     const ag = $('#agenda');
@@ -172,8 +184,7 @@
     const van = eerste && eerste.datum < res.van ? eerste.datum : res.van;
     await Store.insert('ziekmeldingen', { medewerker_id: ik.id, gemeld_op: new Date().toISOString(), van, tot: null, dienst_ids: res.ids, minuten_voor_dienst: minuten, status: 'gemeld', opmerking: res.opm, notitie_beheer: '' });
     const wanneer = eerste ? ` Eerste dienst: ${A.datumKort(eerste.datum)} ${eerste.start} (${minuten < 60 ? minuten + ' min' : Math.round(minuten / 6) / 10 + ' uur'} van tevoren).` : '';
-    await A.melding(null, `🤒 ${ik.naam} heeft zich ziek gemeld.${wanneer} Bevestig het bij Aanvragen → Ziek.`);
-    await A.push('Ziekmelding ' + ik.naam, `${ik.naam} heeft zich ziek gemeld.${wanneer}`, '#aanvragen/ziek');
+    await A.melding(null, `🤒 ${ik.naam} heeft zich ziek gemeld.${wanneer} Bevestig het bij Aanvragen → Ziek.`, { titel: 'Ziekmelding ' + ik.naam, link: '#aanvragen/ziek' });
     await ververs();
     belModal();
   }
@@ -194,8 +205,7 @@
     if (!res) return;
     const tot = G.addDays(res, -1) < z.van ? z.van : G.addDays(res, -1);
     await Store.update('ziekmeldingen', z.id, { tot });
-    await A.melding(null, `💪 ${ik.naam} heeft zich beter gemeld en kan weer werken vanaf ${A.datumLang(res)}.`);
-    await A.push('Betermelding ' + ik.naam, `${ik.naam} kan weer werken vanaf ${A.datumLang(res)}.`, '#verzuim');
+    await A.melding(null, `💪 ${ik.naam} heeft zich beter gemeld en kan weer werken vanaf ${A.datumLang(res)}.`, { titel: 'Betermelding ' + ik.naam, link: '#verzuim' });
     await ververs(); A.toast('Beter gemeld. Welkom terug!', 'ok');
   }
 
@@ -292,8 +302,7 @@
       if (A.data.instellingen.ruil_goedkeuring) {
         await Store.update('ruilverzoeken', r.id, { status: 'overgenomen', naar_id: ik.id });
         await A.melding(r.van_id, `👍 ${ik.naam} heeft de ruil voor ${omschr} bevestigd. Nu wacht het nog op goedkeuring van de baas.`);
-        await A.melding(null, `Ruil goed te keuren: ${ik.naam} neemt ${omschr} over van ${A.mwNaam(r.van_id)}${t ? ' (en geeft ' + A.datumLang(t.datum) + ' terug)' : ''}.`);
-        await A.push('Ruil goedkeuren', `${A.mwNaam(r.van_id)} en ${ik.naam} zijn akkoord: ${omschr}${t ? ' en ' + A.datumLang(t.datum) : ''}. Keur je het goed?`, '#aanvragen/ruil');
+        await A.melding(null, `Ruil goed te keuren: ${ik.naam} neemt ${omschr} over van ${A.mwNaam(r.van_id)}${t ? ' (en geeft ' + A.datumLang(t.datum) + ' terug)' : ''}.`, { titel: 'Ruil goedkeuren', link: '#aanvragen/ruil' });
         A.toast('Bevestigd! De baas moet het nog goedkeuren.', 'ok');
       } else {
         await A.voerRuilUit({ ...nu, naar_id: ik.id });
@@ -383,8 +392,7 @@
       if (!van) return A.toast('Kies een datum', 'fout');
       if (tot < van) return A.toast('De einddatum ligt voor de begindatum', 'fout');
       await Store.insert('verlof', { medewerker_id: ik.id, van, tot, reden: $('#vReden').value, status: 'aangevraagd', reactie: '', aangevraagd_op: new Date().toISOString() });
-      await A.melding(null, `${ik.naam} vraagt vrij: ${A.datumKort(van)}${tot !== van ? ' t/m ' + A.datumKort(tot) : ''}.`);
-      await A.push('Vrij-aanvraag ' + ik.naam, `${ik.naam} vraagt vrij: ${A.datumKort(van)}${tot !== van ? ' t/m ' + A.datumKort(tot) : ''}${$('#vReden').value ? ' (' + $('#vReden').value + ')' : ''}.`, '#aanvragen/verlof');
+      await A.melding(null, `${ik.naam} vraagt vrij: ${A.datumKort(van)}${tot !== van ? ' t/m ' + A.datumKort(tot) : ''}${$('#vReden').value ? ' (' + $('#vReden').value + ')' : ''}.`, { titel: 'Vrij-aanvraag ' + ik.naam, link: '#aanvragen/verlof' });
       await ververs(); A.toast('Aanvraag verstuurd', 'ok');
     });
     $('#bToevoegen').onclick = e => A.bezig(e.target, async () => {
@@ -423,7 +431,8 @@
   // ---------------- meldingen ----------------
   async function toonMeldingen() {
     const lijst = A.data.meldingen.filter(m => m.medewerker_id === ik.id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 30);
-    A.modal('Meldingen', `<div class="melding-lijst">${lijst.length ? lijst.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}</div>`);
+    A.modal('Meldingen', `<div id="mdPush"></div><div class="melding-lijst">${lijst.length ? lijst.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}</div>`);
+    tekenPush();
     const ongelezen = lijst.filter(m => !m.gelezen);
     for (const m of ongelezen) await Store.update('meldingen', m.id, { gelezen: true });
     if (ongelezen.length) { await A.reload(); ik = A.mw(ik.id); $('#belBadge').classList.add('verborgen'); }
