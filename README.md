@@ -110,14 +110,13 @@ Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt
 
 ---
 
-## 4. Meldingen op je telefoon (beheerder)
-Meldingen in de app zie je pas als je de app opent. Voor een echt pushbericht gebruikt de app het gratis **ntfy**:
-1. Installeer de app **ntfy** (Play Store of App Store).
-2. Ga in het beheer naar **Instellingen → Meldingen op je telefoon**, klik op 🎲 voor een uniek onderwerp en sla op.
-3. Tik in de ntfy-app op **+** en abonneer je op precies hetzelfde onderwerp.
-4. Klik op **Testbericht**.
+## 4. App en meldingen op de telefoon
+De site werkt als app (installeren) en stuurt pushmeldingen, voor personeel én beheer. Geen extra app nodig.
+- **Android**: knop *App installeren* en *Meldingen aanzetten* (op de personeelspagina, onder het belletje en bij Instellingen in het beheer).
+- **iPhone**: eerst via Safari → Deel-knop → *Zet op beginscherm*, daarna de app vanaf het beginscherm openen en meldingen aanzetten (iOS 16.4+).
 
-Je krijgt dan een bericht bij: een nieuw rooster om te controleren, feesten die na de uitvraag zijn ingepland, een vrij-aanvraag en een ruil die goedgekeurd moet worden. Het onderwerp werkt als een soort wachtwoord. Wie het kent, kan je berichten sturen, dus houd het voor jezelf.
+Elke nieuwe rij in de tabel `meldingen` gaat automatisch als pushbericht naar de juiste telefoon(s): een database-trigger roept de Edge Function `rooster-push` aan.
+Installatie: `supabase/push.sql` uitvoeren, Edge Function `supabase/functions/rooster-push/index.ts` aanmaken (Verify JWT uit) met de secrets `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, en `VAPID_PUBLIC_KEY` in `js/config.js`.
 
 ## 5. Goed om te weten
 
