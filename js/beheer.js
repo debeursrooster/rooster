@@ -1,0 +1,1183 @@
+// =====================================================================
+//  Beheerpagina
+// =====================================================================
+(function () {
+  const G = window.Gen, A = window.App, esc = A.esc;
+  const $ = s => document.querySelector(s);
+  const hoofd = $('#hoofd');
+  const staat = {
+    maand: null, weergave: 'kalender', loc: 'alle',
+    aanvraagTab: 'verlof', zalenVerleden: false
+  };
+
+  // ---------------- opstarten ----------------
+  async function start() {
+    try { await A.reload(); }
+    catch (e) {
+      document.body.innerHTML = `<div class="login"><div class="login-kaart"><h2>Kan geen verbinding maken</h2><p class="zacht">${esc(e.message)}</p><p>Controleer de gegevens in <code>js/config.js</code> en of het schema in Supabase is geplaatst.</p></div></div>`;
+      return;
+    }
+    if (Store.modus === 'demo') $('#demoBand').classList.remove('verborgen');
+    $('#loginNaam').textContent = A.data.instellingen.bedrijfsnaam || 'Roosterbeheer';
+    if (sessionStorage.getItem('rooster_admin') === 'ja') return toonBeheer();
+    $('#login').classList.remove('verborgen');
+    if (Store.modus === 'demo') $('#adminPin').placeholder = 'demo: 0000';
+    $('#adminPin').focus();
+  }
+
+  $('#loginForm').onsubmit = e => {
+    e.preventDefault();
+    if ($('#adminPin').value === String(A.data.instellingen.admin_pin)) {
+      sessionStorage.setItem('rooster_admin', 'ja');
+      $('#login').classList.add('verborgen');
+      toonBeheer();
+    } else { A.toast('Onjuiste code', 'fout'); $('#adminPin').value = ''; }
+  };
+  $('#uitloggen').onclick = e => { e.preventDefault(); sessionStorage.removeItem('rooster_admin'); location.reload(); };
+  $('#demoReset').onclick = async () => {
+    if (await A.bevestig('Demo opnieuw beginnen', 'Alle demo-gegevens worden gewist en opnieuw aangemaakt.', 'Opnieuw beginnen')) { Store.reset(); location.reload(); }
+  };
+  $('#menuKnop').onclick = () => $('#zijbalk').classList.toggle('open');
+
+  async function toonBeheer() {
+    $('#beheer').classList.remove('verborgen');
+    $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam;
+    const uv = await A.verwerkUitvragen();
+    if (uv.ingepland.length) A.toast('Uitvraag afgerond: ' + uv.ingepland.join(', ') + (uv.teControleren ? ' – controleer en verstuur' : ' ingepland'), 'ok');
+    const gemaakt = await A.autoRooster();
+    if (gemaakt) A.toast('Rooster voor ' + A.maandNaam(gemaakt) + ' is automatisch gemaakt', 'ok');
+    window.addEventListener('hashchange', route);
+    route();
+  }
+
+  function route() {
+    const p = (location.hash || '#overzicht').slice(1).split('/')[0];
+    document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('actief', a.dataset.p === p));
+    $('#zijbalk').classList.remove('open');
+    const t = document.querySelector('#nav a[data-p="' + p + '"]');
+    $('#mobielTitel').textContent = t ? t.textContent.replace(/\d+$/, '').trim() : 'Roosterbeheer';
+    updateTellers();
+    (PAGINAS[p] || PAGINAS.overzicht)();
+    window.scrollTo(0, 0);
+  }
+  async function herlaad() { await A.reload(); updateTellers(); }
+  function opnieuw() { (PAGINAS[(location.hash || '#overzicht').slice(1).split('/')[0]] || PAGINAS.overzicht)(); updateTellers(); }
+
+  function updateTellers() {
+    const n = A.data.verlof.filter(v => v.status === 'aangevraagd').length +
+      A.data.ruilverzoeken.filter(r => r.status === 'overgenomen').length +
+      A.data.ziekmeldingen.filter(z => z.status === 'gemeld').length;
+    const t = $('#telAanvragen'); t.textContent = n; t.classList.toggle('verborgen', !n);
+  }
+
+  // ---------------- helpers ----------------
+  const avatar = m => m ? `<span class="avatar" style="background:${esc(m.kleur || '#999')}">${esc(m.naam[0] || '?')}</span>` : `<span class="avatar" style="background:#bbb">?</span>`;
+  const locLabel = l => `<span class="label ${l === 'zalen' ? 'zaal' : 'caf'}">${A.LOC[l]}</span>`;
+  const tijd = d => esc(d.start) + '–' + esc(d.eind);
+  const actieveMw = () => A.data.medewerkers.filter(m => m.actief !== false).sort((a, b) => a.naam.localeCompare(b.naam));
+  const functieOpties = (sel) => (A.data.instellingen.functies || []).map(f => `<option ${f === sel ? 'selected' : ''}>${esc(f)}</option>`).join('');
+  const urenVan = (mwId, maand) => A.data.diensten.filter(d => d.medewerker_id === mwId && d.maand === maand).reduce((s, d) => s + G.hours(d.start, d.eind), 0);
+
+  async function meldAlsGepubliceerd(maand, mwId, tekst) {
+    if (mwId && A.isGepubliceerd(maand)) await A.melding(mwId, tekst);
+  }
+  // Ziet het personeel deze dienst? (gepubliceerde maand, of feest dat via de uitvraag is ingepland)
+  const dienstZichtbaar = d => A.dienstZichtbaar(d);
+  async function meldDienst(d, mwId, tekst) { if (mwId && dienstZichtbaar(d)) await A.melding(mwId, tekst); }
+
+  // =====================================================================
+  //  OVERZICHT
+  // =====================================================================
+  function pOverzicht() {
+    const d = A.data, nu = G.today(), deze = G.monthOf(nu), volgende = G.nextMonth(deze);
+    const verlofOpen = d.verlof.filter(v => v.status === 'aangevraagd');
+    const ruilOpen = d.ruilverzoeken.filter(r => r.status === 'overgenomen');
+    const openDiensten = d.diensten.filter(x => !x.medewerker_id && x.datum >= nu);
+    const rv = A.rooster(volgende);
+    const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
+    let roosterTekst, roosterSub;
+    if (!rv) { roosterTekst = 'Nog niet'; roosterSub = 'wordt gemaakt op ' + A.datumKort(genDatum); }
+    else if (rv.status === 'concept') { roosterTekst = 'Concept'; roosterSub = 'klaar om te controleren'; }
+    else { roosterTekst = 'Online'; roosterSub = 'gepubliceerd'; }
+
+    const vandaag = d.diensten.filter(x => x.datum === nu && x.medewerker_id).sort((a, b) => G.min(a.start) - G.min(b.start));
+    const feesten = d.zalen_events.filter(e => e.datum >= nu && e.datum <= G.addDays(nu, 21)).sort((a, b) => a.datum.localeCompare(b.datum));
+    const meldingen = d.meldingen.filter(m => !m.medewerker_id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 8);
+
+    const teControleren = [];
+    for (const r of d.roosters.filter(r => r.status === 'concept')) teControleren.push(`<a class="knop ok" href="#rooster" data-maand="${r.maand}">📅 Rooster ${esc(A.maandNaam(r.maand))}</a>`);
+    const zGemeld = d.ziekmeldingen.filter(z => z.status === 'gemeld');
+    if (zGemeld.length) teControleren.unshift(`<a class="knop gevaar" style="background:#fff" href="#aanvragen/ziek">🤒 ${zGemeld.length} ziekmelding${zGemeld.length > 1 ? 'en' : ''}</a>`);
+    const evConcept = d.zalen_events.filter(e => e.status === 'concept');
+    if (evConcept.length) teControleren.push(`<a class="knop ok" href="#zalen">🎉 ${evConcept.length} feest${evConcept.length > 1 ? 'en' : ''}</a>`);
+    hoofd.innerHTML = `
+      ${teControleren.length ? `<div class="statusbalk concept" style="margin-bottom:1.2em">🔔 <div><b>Klaar om te controleren en te versturen:</b> het personeel ziet dit pas na versturen.</div><div class="acties">${teControleren.join('')}</div></div>` : ''}
+      <div class="kop"><div><h1>Goedendag 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
+        <div class="acties"><a class="knop" href="#zalen">+ Feest toevoegen</a><a class="knop primair" href="#rooster">Rooster bekijken</a></div></div>
+      <div class="tegels">
+        <div class="tegel klik ${verlofOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/verlof"><div class="getal">${verlofOpen.length}</div><div class="wat">vrij-aanvragen</div></div>
+        <div class="tegel klik ${ruilOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/ruil"><div class="getal">${ruilOpen.length}</div><div class="wat">ruilingen goed te keuren</div></div>
+        <div class="tegel klik ${openDiensten.length ? 'aandacht' : ''}" data-ga="rooster"><div class="getal">${openDiensten.length}</div><div class="wat">open diensten</div></div>
+        <div class="tegel klik" data-ga="rooster" data-maand="${volgende}"><div class="getal" style="font-size:1.4rem">${roosterTekst}</div><div class="wat">rooster ${esc(A.maandNaam(volgende))}<br><small>${roosterSub}</small></div></div>
+      </div>
+      <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
+        <div class="paneel"><div class="paneel-kop"><h3>Vandaag aan het werk</h3></div>
+          ${vandaag.length ? vandaag.map(x => { const m = A.mw(x.medewerker_id); return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')}</div><div class="meta">${tijd(x)} · ${esc(x.functie)}</div></div><div class="rechts">${locLabel(x.locatie)}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">☕</span>Vandaag niemand ingepland</div>'}
+        </div>
+        <div class="paneel"><div class="paneel-kop"><h3>Komende feesten</h3><a class="knop klein" href="#zalen">Agenda</a></div>
+          ${feesten.length ? feesten.map(e => { const ds = d.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; return `<div class="item"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div><div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten ${e.zaal ? '· ' + esc(e.zaal) : ''}</div></div><div class="rechts">${e.status === 'open' ? uitvraagLabel(e) : e.status === 'concept' ? '<span class="label let">te controleren</span>' : !ds.length ? '<span class="label">nog niet ingeroosterd</span>' : open ? `<span class="label fout">${open} open</span>` : `<span class="label ok">${ds.length} mensen</span>`}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen feesten in de komende 3 weken</div>'}
+        </div>
+        <div class="paneel melding-lijst"><div class="paneel-kop"><h3>Meldingen</h3>${meldingen.some(m => !m.gelezen) ? '<button class="knop klein" id="allesGelezen">Alles gelezen</button>' : ''}</div>
+          ${meldingen.length ? meldingen.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}
+        </div>
+      </div>`;
+    hoofd.querySelectorAll('.statusbalk [data-maand]').forEach(a => a.onclick = () => { staat.maand = a.dataset.maand; });
+    hoofd.querySelectorAll('[data-ga]').forEach(t => t.onclick = () => {
+      const [p, sub] = t.dataset.ga.split('/');
+      if (sub) staat.aanvraagTab = sub;
+      if (t.dataset.maand) staat.maand = t.dataset.maand;
+      location.hash = p;
+    });
+    const ag = $('#allesGelezen');
+    if (ag) ag.onclick = () => A.bezig(ag, async () => {
+      for (const m of d.meldingen.filter(m => !m.medewerker_id && !m.gelezen)) await Store.update('meldingen', m.id, { gelezen: true });
+      await herlaad(); pOverzicht();
+    });
+  }
+
+  // =====================================================================
+  //  ROOSTER
+  // =====================================================================
+  function pRooster() {
+    const d = A.data, nu = G.today();
+    if (!staat.maand) {
+      const volgende = G.nextMonth(G.monthOf(nu));
+      const rv = A.rooster(volgende);
+      staat.maand = rv && rv.status === 'concept' ? volgende : G.monthOf(nu);
+    }
+    const maand = staat.maand, r = A.rooster(maand);
+    const diensten = d.diensten.filter(x => x.maand === maand && (staat.loc === 'alle' || x.locatie === staat.loc));
+    const open = diensten.filter(x => !x.medewerker_id).length;
+
+    let status;
+    if (!r) {
+      const gd = G.generatieDatum(maand, d.instellingen.dagen_voor_einde);
+      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}</div>
+        <div class="acties"><button class="knop primair" id="maakRooster">✨ Rooster nu maken</button></div></div>`;
+    } else if (r.status === 'concept') {
+      status = `<div class="statusbalk concept">📝 <div><b>Concept</b> – controleer het rooster; het personeel ziet het pas na versturen. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle diensten zijn ingevuld.'}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
+    } else {
+      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terug naar concept</button></div></div>`;
+    }
+
+    hoofd.innerHTML = `
+      <div class="kop"><h1>Rooster</h1>
+        <div class="acties">
+          <div class="maandkeuze"><button class="icoon" id="vorige" aria-label="Vorige maand">◀</button><b>${esc(A.maandNaam(maand))}</b><button class="icoon" id="volgende" aria-label="Volgende maand">▶</button></div>
+          <div class="tabs" id="locTabs"><button data-v="alle">Alles</button><button data-v="cafetaria">Cafetaria</button><button data-v="zalen">Zalen</button></div>
+          <div class="tabs" id="weergaveTabs"><button data-v="kalender">Kalender</button><button data-v="personen">Per persoon</button><button data-v="uren">Uren</button></div>
+          <button class="knop" onclick="window.print()">🖨</button>
+        </div></div>
+      ${status}
+      <div id="roosterInhoud"></div>`;
+    hoofd.querySelectorAll('#locTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.loc); b.onclick = () => { staat.loc = b.dataset.v; pRooster(); }; });
+    hoofd.querySelectorAll('#weergaveTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.weergave); b.onclick = () => { staat.weergave = b.dataset.v; pRooster(); }; });
+    $('#vorige').onclick = () => { staat.maand = G.prevMonth(maand); pRooster(); };
+    $('#volgende').onclick = () => { staat.maand = G.nextMonth(maand); pRooster(); };
+    const k = id => document.getElementById(id);
+    if (k('maakRooster')) k('maakRooster').onclick = e => A.bezig(e.currentTarget, () => maakRooster(maand));
+    if (k('opnieuwRooster')) k('opnieuwRooster').onclick = async e => { if (await A.bevestig('Opnieuw maken', 'Alle diensten van ' + A.maandNaam(maand) + ' worden opnieuw verdeeld. Handmatige wijzigingen gaan verloren. Feesten die via de uitvraag zijn ingepland blijven staan.', 'Opnieuw maken')) A.bezig(e.target, () => maakRooster(maand, true)); };
+    if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Concept weggooien', 'Het concept-rooster voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
+    if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand));
+    if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terug naar concept', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terug naar concept')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
+    if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
+    if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Aandachtspunten', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
+
+    const inh = $('#roosterInhoud');
+    if (staat.weergave === 'personen') return renderPersonen(inh, maand);
+    if (staat.weergave === 'uren') return renderUren(inh, maand);
+    renderKalender(inh, maand, diensten);
+  }
+
+  async function verwijderMaandDiensten(maand) {
+    for (const x of A.data.diensten.filter(x => x.maand === maand && !G.dienstVast(x, A.data))) await Store.remove('diensten', x.id);
+  }
+  async function maakRooster(maand, opnieuw) {
+    if (opnieuw) await verwijderMaandDiensten(maand);
+    await herlaad();
+    const res = G.generateMonth(maand, A.data);
+    await Store.insert('diensten', res.diensten);
+    const r = A.rooster(maand);
+    const rec = { status: r ? r.status : 'concept', gegenereerd_op: new Date().toISOString(), meldingen: res.meldingen };
+    if (r) await Store.update('roosters', r.id, rec); else await Store.insert('roosters', { maand, ...rec });
+    if (r && r.status === 'gepubliceerd') {
+      const wie = new Set(res.diensten.filter(x => x.medewerker_id).map(x => x.medewerker_id));
+      for (const id of wie) await A.melding(id, 'Het rooster van ' + A.maandNaam(maand) + ' is aangepast. Kijk even naar je diensten.');
+    }
+    await herlaad();
+    A.toast('Rooster gemaakt: ' + res.diensten.length + ' diensten' + (res.diensten.filter(x => !x.medewerker_id).length ? ', ' + res.diensten.filter(x => !x.medewerker_id).length + ' open' : ''), 'ok');
+    pRooster();
+  }
+
+  async function publiceer(maand) {
+    const r = A.rooster(maand);
+    const open = A.data.diensten.filter(x => x.maand === maand && !x.medewerker_id).length;
+    if (open && !await A.bevestig('Er zijn nog open diensten', `Er ${open > 1 ? 'zijn' : 'is'} nog ${open} open dienst${open > 1 ? 'en' : ''}. Personeel kan open diensten zelf oppakken. Toch versturen?`, 'Versturen')) return;
+    await Store.update('roosters', r.id, { status: 'gepubliceerd', gepubliceerd_op: new Date().toISOString() });
+    await herlaad();
+    const n = await A.meldRooster(maand);
+    await herlaad();
+    A.toast(n + ' medewerker(s) hebben een melding gekregen', 'ok');
+    pRooster();
+    deelWhatsApp(maand);
+  }
+
+  function siteUrl() {
+    const ins = A.data.instellingen;
+    if (ins.site_url) return ins.site_url;
+    return location.href.replace(/beheer\.html.*$/, 'index.html').replace(/#.*$/, '');
+  }
+  function deelWhatsApp(maand) {
+    const tekst = `📅 Het rooster voor ${A.maandNaam(maand)} staat online!\nBekijk je diensten, vraag vrij of ruil een dienst via:\n${siteUrl()}`;
+    A.modal('Personeel laten weten', `<p>Het rooster is verstuurd: iedereen die is ingeroosterd heeft een melding in de app gekregen. Wil je het ook in de WhatsApp-groep zetten?</p><textarea id="waTekst" rows="4">${esc(tekst)}</textarea>`,
+      [{ label: 'Niet nu', waarde: null }, { label: '💬 Open WhatsApp', soort: 'ok', waarde: bg => { window.open('https://wa.me/?text=' + encodeURIComponent(bg.querySelector('#waTekst').value), '_blank'); return true; } }]);
+  }
+
+  function renderKalender(el, maand, diensten) {
+    const d = A.data, nu = G.today();
+    const dicht = new Map(d.sluitingsdagen.map(s => [s.datum, s.reden]));
+    const eerste = maand + '-01', laatste = G.lastDay(maand);
+    let w = G.weekStart(eerste);
+    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
+    const heeftRooster = !!A.rooster(maand);
+    while (w <= laatste) {
+      html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen">`;
+      for (let i = 0; i < 7; i++) {
+        const dag = G.addDays(w, i);
+        if (G.monthOf(dag) !== maand) { html += '<div class="dag buiten"></div>'; continue; }
+        const ds = diensten.filter(x => x.datum === dag).sort((a, b) => (a.locatie === b.locatie ? 0 : a.locatie === 'cafetaria' ? -1 : 1) || G.min(a.start) - G.min(b.start));
+        const evs = d.zalen_events.filter(e => e.datum === dag && staat.loc !== 'cafetaria');
+        const isDicht = dicht.has(dag);
+        const ruilIds = new Set(d.ruilverzoeken.filter(r => ['open', 'gevraagd', 'overgenomen'].includes(r.status)).flatMap(r => [r.dienst_id, r.terug_dienst_id]));
+        html += `<div class="dag ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
+          <div class="dag-kop"><span>${A.DAG_KORT[i]}</span><span class="nr">${G.parse(dag).getUTCDate()}</span></div>
+          ${isDicht && staat.loc !== 'zalen' ? `<span class="label">Cafetaria dicht${dicht.get(dag) ? ' · ' + esc(dicht.get(dag)) : ''}</span>` : ''}
+          ${evs.map(e => `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>`).join('')}
+          ${ds.map(x => { const m = A.mw(x.medewerker_id); return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}">
+            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${esc(m ? m.naam : 'Open')}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
+          ${heeftRooster ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}
+        </div>`;
+      }
+      html += '</div></div>';
+      w = G.addDays(w, 7);
+    }
+    el.innerHTML = html;
+    el.querySelectorAll('.dienst').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
+    el.querySelectorAll('[data-plus]').forEach(x => x.onclick = () => dienstModal(null, x.dataset.plus));
+    el.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
+  }
+
+  function renderPersonen(el, maand) {
+    const d = A.data, dagen = G.monthDays(maand);
+    const mws = actieveMw();
+    let html = `<div class="paneel"><div class="tabel-wrap"><table class="matrix"><thead><tr><th class="naamcel">Medewerker</th>`;
+    dagen.forEach(dag => { const wd = G.weekday(dag); html += `<th class="${wd >= 5 ? 'we' : ''}">${A.DAG_KORT[wd]}<br>${G.parse(dag).getUTCDate()}</th>`; });
+    html += `<th>Uren</th></tr></thead><tbody>`;
+    for (const m of mws) {
+      html += `<tr><td class="naamcel"><span class="stip" style="background:${esc(m.kleur)}"></span> ${esc(m.naam)}</td>`;
+      for (const dag of dagen) {
+        const wd = G.weekday(dag);
+        const ds = d.diensten.filter(x => x.datum === dag && x.medewerker_id === m.id && (staat.loc === 'alle' || x.locatie === staat.loc));
+        const vl = d.verlof.find(v => v.medewerker_id === m.id && v.status === 'goedgekeurd' && v.van <= dag && v.tot >= dag);
+        const nb = d.beschikbaarheid.find(b => b.medewerker_id === m.id && b.datum === dag);
+        let cel = ds.map(x => `<span class="blok ${x.locatie === 'zalen' ? 'zalen' : 'caf'}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}">${x.start.replace(':00', '')}-${x.eind.replace(':00', '')}</span>`).join('');
+        if (!cel && vl) cel = '<span class="vrij" title="Vrij">V</span>';
+        else if (!cel && nb) cel = `<span class="nb" title="Kan niet: ${esc(nb.deel)}">–</span>`;
+        else if (!cel && (m.vrije_dagen || []).map(Number).includes(wd)) cel = '<span class="zacht">·</span>';
+        html += `<td class="${wd >= 5 ? 'we' : ''}">${cel}</td>`;
+      }
+      const u = urenVan(m.id, maand), doel = G.doelUren(m, maand);
+      html += `<td><b>${A.uren(u)}</b>${doel ? `<br><small>/${Math.round(doel)}</small>` : ''}</td></tr>`;
+    }
+    html += `</tbody></table></div><p class="zacht" style="margin:.8em 0 0;font-size:.85rem">V = vrij (goedgekeurd) · – = heeft aangegeven niet te kunnen · · = vaste vrije dag</p></div>`;
+    el.innerHTML = html;
+    el.querySelectorAll('.blok').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
+  }
+
+  function renderUren(el, maand) {
+    const mws = actieveMw();
+    const rijen = mws.map(m => {
+      const ds = A.data.diensten.filter(x => x.medewerker_id === m.id && x.maand === maand);
+      const u = ds.reduce((s, x) => s + G.hours(x.start, x.eind), 0);
+      const doel = G.doelUren(m, maand);
+      return { m, u, doel, n: ds.length, caf: ds.filter(x => x.locatie === 'cafetaria').reduce((s, x) => s + G.hours(x.start, x.eind), 0), zaal: ds.filter(x => x.locatie === 'zalen').reduce((s, x) => s + G.hours(x.start, x.eind), 0) };
+    });
+    el.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Uren ${esc(A.maandNaam(maand))}</h3><button class="knop klein" id="csv">⬇ Exporteer (Excel/CSV)</button></div>
+      <div class="tabel-wrap"><table class="lijst"><thead><tr><th>Medewerker</th><th>Contract p/w</th><th>Doel maand</th><th>Gepland</th><th>Cafetaria</th><th>Zalen</th><th>Diensten</th><th style="width:22%"></th></tr></thead><tbody>
+      ${rijen.map(r => { const pct = r.doel ? Math.min(100, r.u / r.doel * 100) : (r.u ? 100 : 0); const kl = !r.doel ? '' : r.u > r.doel * 1.1 ? 'over' : r.u < r.doel * 0.85 ? 'onder' : ''; return `<tr>
+        <td><span class="stip" style="background:${esc(r.m.kleur)}"></span> <b>${esc(r.m.naam)}</b></td><td>${r.m.contracturen ? A.uren(+r.m.contracturen) : '<span class="label">oproep</span>'}</td>
+        <td>${r.doel ? A.uren(Math.round(r.doel)) : '–'}</td><td><b>${A.uren(r.u)}</b>${r.doel ? ` <small class="zacht">(${r.u - r.doel >= 0 ? '+' : ''}${A.uren(Math.round(r.u - r.doel))})</small>` : ''}</td>
+        <td>${A.uren(r.caf)}</td><td>${A.uren(r.zaal)}</td><td>${r.n}</td><td><div class="balk ${kl}"><i style="width:${pct}%"></i></div></td></tr>`; }).join('')}
+      </tbody></table></div><p class="zacht" style="font-size:.85rem;margin:.8em 0 0">Doel maand = contracturen per week × aantal dagen in de maand ÷ 7. Oranje = te weinig, geel = ruim boven contract.</p></div>`;
+    $('#csv').onclick = () => {
+      const kop = 'Medewerker;Contract per week;Doel maand;Gepland;Cafetaria;Zalen;Aantal diensten';
+      const regels = rijen.map(r => [r.m.naam, r.m.contracturen || 0, Math.round(r.doel), r.u, r.caf, r.zaal, r.n].join(';').replace(/\./g, ','));
+      const detail = ['', 'Datum;Dag;Medewerker;Locatie;Functie;Start;Eind;Uren'].concat(
+        A.data.diensten.filter(x => x.maand === maand).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start))
+          .map(x => [x.datum, A.DAGEN[G.weekday(x.datum)], A.mwNaam(x.medewerker_id), A.LOC[x.locatie], x.functie, x.start, x.eind, String(G.hours(x.start, x.eind)).replace('.', ',')].join(';')));
+      A.download('uren-' + maand + '.csv', '﻿' + [kop].concat(regels, detail).join('\r\n'), 'text/csv');
+    };
+  }
+
+  // ---------- dienst bewerken / toevoegen ----------
+  async function dienstModal(dienst, nieuweDatum) {
+    const nieuw = !dienst;
+    const d = dienst ? { ...dienst } : { id: Store.uuid(), maand: G.monthOf(nieuweDatum), datum: nieuweDatum, locatie: staat.loc === 'zalen' ? 'zalen' : 'cafetaria', event_id: null, start: '16:00', eind: '21:00', functie: (A.data.instellingen.functies || [])[0], medewerker_id: null, notitie: '' };
+    const evs = A.data.zalen_events.filter(e => e.datum === d.datum);
+    let gekozen = d.medewerker_id;
+    const html = `
+      <p class="zacht" style="margin-top:-.3em">${esc(A.datumLang(d.datum))}${d.event_id && A.event(d.event_id) ? ' · 🎉 ' + esc(A.event(d.event_id).naam) : ''}</p>
+      <div class="rij">
+        <div class="veld"><label>Locatie</label><select id="dLoc"><option value="cafetaria" ${d.locatie === 'cafetaria' ? 'selected' : ''}>Cafetaria</option><option value="zalen" ${d.locatie === 'zalen' ? 'selected' : ''}>Zalencentrum</option></select></div>
+        <div class="veld"><label>Functie</label><select id="dFn">${functieOpties(d.functie)}</select></div>
+      </div>
+      <div class="rij">
+        <div class="veld"><label>Van</label><input type="time" id="dStart" value="${esc(d.start)}"></div>
+        <div class="veld"><label>Tot</label><input type="time" id="dEind" value="${esc(d.eind)}"></div>
+      </div>
+      <div class="veld ${evs.length ? '' : 'verborgen'}" id="dEvWrap"><label>Bij feest</label><select id="dEv"><option value="">– geen –</option>${evs.map(e => `<option value="${e.id}" ${e.id === d.event_id ? 'selected' : ''}>${esc(e.naam)}</option>`).join('')}</select></div>
+      <div class="veld"><label>Wie werkt er? <small>(beste keuze bovenaan)</small></label><div class="kand-lijst" id="kandLijst"></div></div>
+      <div class="veld"><label>Notitie</label><input id="dNot" value="${esc(d.notitie || '')}" placeholder="bv. sleutel ophalen bij…"></div>`;
+    const lees = bg => ({ ...d, locatie: bg.querySelector('#dLoc').value, functie: bg.querySelector('#dFn').value, start: bg.querySelector('#dStart').value, eind: bg.querySelector('#dEind').value, event_id: bg.querySelector('#dEv').value || null, notitie: bg.querySelector('#dNot').value, medewerker_id: gekozen });
+    const tekenKand = bg => {
+      const slot = lees(bg);
+      const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== d.id));
+      const k = G.kandidaten(ctx, slot);
+      const lijst = bg.querySelector('#kandLijst');
+      lijst.innerHTML = `<div class="kand ${!gekozen ? 'gekozen' : ''}" data-k=""><span class="avatar" style="background:#d9cfc0;width:30px;height:30px">–</span><div><b>Open laten</b><div class="r">personeel kan hem zelf oppakken</div></div></div>` +
+        k.map(x => { const u = urenVan(x.m.id, slot.maand) - (dienst && dienst.medewerker_id === x.m.id ? G.hours(dienst.start, dienst.eind) : 0); const doel = G.doelUren(x.m, slot.maand);
+          return `<div class="kand ${x.ok ? '' : 'nee'} ${gekozen === x.m.id ? 'gekozen' : ''}" data-k="${x.m.id}">${avatar(x.m).replace('avatar"', 'avatar" ')}<div><b>${esc(x.m.naam)}</b><div class="r">${x.ok ? esc(x.redenen.join(' · ') || 'beschikbaar') : '⛔ ' + esc(x.redenen.join(', '))}</div></div><span class="sc">${A.uren(u)}${doel ? '/' + Math.round(doel) : ''} u</span></div>`; }).join('');
+      lijst.querySelectorAll('.kand').forEach(el => el.onclick = async () => {
+        const id = el.dataset.k || null;
+        if (id && el.classList.contains('nee') && !await A.bevestig('Toch inplannen?', 'Deze medewerker is eigenlijk niet beschikbaar (' + el.querySelector('.r').textContent.replace('⛔ ', '') + '). Toch inplannen?', 'Toch inplannen')) return;
+        gekozen = id; tekenKand(bg);
+      });
+    };
+    const knoppen = [];
+    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
+    knoppen.push({ label: 'Annuleren', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => lees(bg), controle: bg => (!bg.querySelector('#dStart').value || !bg.querySelector('#dEind').value) ? 'Vul begin- en eindtijd in' : null });
+    const res = await A.modal(nieuw ? 'Dienst toevoegen' : 'Dienst aanpassen', html, knoppen, bg => {
+      tekenKand(bg);
+      ['#dLoc', '#dFn', '#dStart', '#dEind'].forEach(s => bg.querySelector(s).addEventListener('change', () => tekenKand(bg)));
+    });
+    if (!res) return;
+    const pub = dienstZichtbaar(d);
+    if (res === 'weg') {
+      await Store.remove('diensten', d.id);
+      await meldDienst(d, d.medewerker_id, `Je dienst op ${A.datumLang(d.datum)} (${d.start}–${d.eind}) is vervallen.`);
+      for (const r of A.data.ruilverzoeken.filter(r => r.dienst_id === d.id)) await Store.remove('ruilverzoeken', r.id);
+    } else if (nieuw) {
+      await Store.insert('diensten', res);
+      await meldDienst(res, res.medewerker_id, `Je bent ingepland op ${A.datumLang(res.datum)} van ${res.start} tot ${res.eind} (${A.LOC[res.locatie]}, ${res.functie}).`);
+    } else {
+      const { id, ...patch } = res;
+      await Store.update('diensten', d.id, patch);
+      if (pub && dienst.medewerker_id !== res.medewerker_id) {
+        if (dienst.medewerker_id) await A.melding(dienst.medewerker_id, `Je dienst op ${A.datumLang(d.datum)} (${dienst.start}–${dienst.eind}) is aan iemand anders gegeven.`);
+        if (res.medewerker_id) await A.melding(res.medewerker_id, `Je bent ingepland op ${A.datumLang(res.datum)} van ${res.start} tot ${res.eind} (${A.LOC[res.locatie]}, ${res.functie}).`);
+      } else if (pub && res.medewerker_id && (dienst.start !== res.start || dienst.eind !== res.eind)) {
+        await A.melding(res.medewerker_id, `Je dienst op ${A.datumLang(res.datum)} is gewijzigd naar ${res.start}–${res.eind}.`);
+      }
+    }
+    await herlaad(); pRooster();
+    A.toast('Opgeslagen', 'ok');
+  }
+
+  // =====================================================================
+  //  AANVRAGEN
+  // =====================================================================
+  function pAanvragen() {
+    const sub = (location.hash.split('/')[1]) || staat.aanvraagTab;
+    staat.aanvraagTab = sub;
+    const d = A.data, nu = G.today();
+    const vOpen = d.verlof.filter(v => v.status === 'aangevraagd').sort((a, b) => a.van.localeCompare(b.van));
+    const vRest = d.verlof.filter(v => v.status !== 'aangevraagd' && v.tot >= G.addDays(nu, -60)).sort((a, b) => b.van.localeCompare(a.van));
+    const rTeKeuren = d.ruilverzoeken.filter(r => r.status === 'overgenomen');
+    const rOpen = d.ruilverzoeken.filter(r => r.status === 'open' || r.status === 'gevraagd');
+    const rRest = d.ruilverzoeken.filter(r => ['goedgekeurd', 'afgewezen', 'geweigerd'].includes(r.status)).sort((a, b) => (b.aangemaakt_op || '').localeCompare(a.aangemaakt_op || '')).slice(0, 15);
+    const nb = d.beschikbaarheid.filter(b => b.datum >= nu).sort((a, b) => a.datum.localeCompare(b.datum));
+
+    const verlofItem = v => { const m = A.mw(v.medewerker_id); const dagen = Math.round((G.parse(v.tot) - G.parse(v.van)) / 864e5) + 1;
+      const conflict = d.diensten.filter(x => x.medewerker_id === v.medewerker_id && x.datum >= v.van && x.datum <= v.tot).length;
+      return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')} <span class="zacht" style="font-weight:500">· ${dagen} dag${dagen > 1 ? 'en' : ''}</span></div>
+        <div class="meta">${esc(A.datumKort(v.van))}${v.tot !== v.van ? ' t/m ' + esc(A.datumKort(v.tot)) : ''}${v.reden ? ' · “' + esc(v.reden) + '”' : ''}</div>
+        ${v.status === 'aangevraagd' && conflict ? `<div class="meta" style="color:var(--let)">⚠️ staat ${conflict}× ingepland in deze periode</div>` : ''}
+        ${v.reactie && v.status !== 'aangevraagd' ? `<div class="meta">Reactie: ${esc(v.reactie)}</div>` : ''}<div class="meta">${A.tijdGeleden(v.aangevraagd_op)}</div></div>
+        <div class="rechts">${v.status === 'aangevraagd' ? `<button class="knop klein gevaar" data-af="${v.id}">Afwijzen</button><button class="knop klein ok" data-goed="${v.id}">Goedkeuren</button>` : `<span class="label ${v.status === 'goedgekeurd' ? 'ok' : 'fout'}">${v.status}</span>`}</div></div>`; };
+    const ruilItem = r => { const x = d.diensten.find(y => y.id === r.dienst_id); const van = A.mw(r.van_id), naar = A.mw(r.naar_id);
+      if (!x) return '';
+      return `<div class="item"><div class="datumblok ${x.locatie}"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(x.datum).getUTCMonth()].slice(0, 3)}</small></div>
+        <div><div class="wie">${esc(van ? van.naam : '?')} → ${naar ? esc(naar.naam) : '<span class="zacht">nog niemand</span>'}</div>
+        <div class="meta">${esc(A.datumLang(x.datum))} · ${tijd(x)} · ${esc(x.functie)} · ${A.LOC[x.locatie]}</div>
+        ${(() => { const t = r.terug_dienst_id && d.diensten.find(y => y.id === r.terug_dienst_id); return t ? `<div class="meta">↔ in ruil daarvoor neemt ${esc(van ? van.naam : '?')} de dienst van ${esc(naar ? naar.naam : '?')} op ${esc(A.datumLang(t.datum))} · ${tijd(t)} over</div>` : ''; })()}
+        ${r.bericht ? `<div class="meta">“${esc(r.bericht)}”</div>` : ''}${r.status === 'gevraagd' ? `<div class="meta" style="color:var(--let)">Wacht nog op bevestiging van ${esc(naar ? naar.naam : '?')}</div>` : ''}${r.status === 'overgenomen' ? '<div class="meta" style="color:var(--ok)">✓ Beide collega\'s zijn akkoord</div>' : ''}</div>
+        <div class="rechts">${r.status === 'overgenomen' ? `<button class="knop klein gevaar" data-raf="${r.id}">Afwijzen</button><button class="knop klein ok" data-rgoed="${r.id}">Goedkeuren</button>` : r.status === 'open' ? `<button class="knop klein" data-rtoewijs="${r.id}">Zelf iemand kiezen</button>` : r.status === 'gevraagd' ? '<span class="label let">wacht op collega</span>' : `<span class="label ${r.status === 'goedgekeurd' ? 'ok' : 'fout'}">${{ goedgekeurd: 'geruild', afgewezen: 'afgewezen', geweigerd: 'collega zei nee' }[r.status] || r.status}</span>`}</div></div>`; };
+
+    hoofd.innerHTML = `<div class="kop"><h1>Aanvragen</h1><div class="tabs" id="aTabs">
+        <button data-v="verlof">Vrij vragen ${vOpen.length ? `(${vOpen.length})` : ''}</button><button data-v="ruil">Ruilen ${rTeKeuren.length ? `(${rTeKeuren.length})` : ''}</button><button data-v="beschikbaar">Kan niet</button><button data-v="ziek">Ziek ${d.ziekmeldingen.filter(z => z.status === 'gemeld').length ? `(${d.ziekmeldingen.filter(z => z.status === 'gemeld').length})` : ''}</button></div></div>
+      <div id="aInh"></div>`;
+    hoofd.querySelectorAll('#aTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === sub); b.onclick = () => { location.hash = 'aanvragen/' + b.dataset.v; }; });
+    const inh = $('#aInh');
+    if (sub === 'ziek') {
+      const gemeld = d.ziekmeldingen.filter(z => z.status === 'gemeld').sort((a, b) => (a.gemeld_op || '').localeCompare(b.gemeld_op || ''));
+      const nuZiek = d.ziekmeldingen.filter(z => z.status === 'bevestigd' && (!z.tot || z.tot >= nu));
+      const item = (z, knoppen) => { const m = A.mw(z.medewerker_id); const ds = (z.dienst_ids || []).map(id => d.diensten.find(x => x.id === id)).filter(Boolean);
+        return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')} <span class="zacht" style="font-weight:500">· ziek vanaf ${esc(A.datumKort(z.van))}</span></div>
+          <div class="meta">Gemeld ${A.tijdGeleden(z.gemeld_op)}${z.minuten_voor_dienst != null ? ' · ' + meldtijdTekst(z.minuten_voor_dienst) + ' voor de dienst' : ''}${z.opmerking ? ' · “' + esc(z.opmerking) + '”' : ''}</div>
+          ${ds.length ? `<div class="meta">Vervalt: ${ds.map(x => esc(A.datumKort(x.datum)) + ' ' + tijd(x) + (x.medewerker_id && x.medewerker_id !== z.medewerker_id ? ' → ' + esc(A.mwNaam(x.medewerker_id)) : x.medewerker_id ? '' : ' <b style="color:var(--fout)">(open)</b>')).join(' · ')}</div>` : ''}</div>
+          <div class="rechts">${knoppen}</div></div>`; };
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Te bevestigen</h3></div><p class="zacht" style="margin-top:-.4em">Bevestig een ziekmelding als de medewerker je heeft gebeld. Je regelt dan meteen vervanging.</p>
+          ${gemeld.length ? gemeld.map(z => item(z, `<button class="knop klein" data-zaf="${z.id}">Afwijzen</button><button class="knop klein ok" data-zok="${z.id}">Bevestigen</button>`)).join('') : '<div class="leeg">Geen nieuwe ziekmeldingen</div>'}</div>
+        <div class="paneel"><div class="paneel-kop"><h3>Nu ziek</h3><a class="knop klein" href="#verzuim">Verzuimoverzicht</a></div>
+          ${nuZiek.length ? nuZiek.map(z => item(z, `<button class="knop klein" data-zbeter="${z.id}">Beter melden</button>`)).join('') : '<div class="leeg"><span class="groot">💪</span>Niemand is ziek</div>'}</div>`;
+      inh.querySelectorAll('[data-zok]').forEach(b => b.onclick = () => ziekBevestigen(b.dataset.zok));
+      inh.querySelectorAll('[data-zaf]').forEach(b => b.onclick = () => ziekAfwijzen(b.dataset.zaf));
+      inh.querySelectorAll('[data-zbeter]').forEach(b => b.onclick = () => ziekBeter(b.dataset.zbeter));
+      return;
+    }
+    if (sub === 'ruil') {
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Goed te keuren</h3></div>${rTeKeuren.length ? rTeKeuren.map(ruilItem).join('') : '<div class="leeg">Niets goed te keuren</div>'}</div>
+        <div class="paneel"><div class="paneel-kop"><h3>Lopend (nog geen collega akkoord)</h3></div>${rOpen.length ? rOpen.map(ruilItem).join('') : '<div class="leeg">Geen openstaande ruilverzoeken</div>'}</div>
+        <div class="paneel"><div class="paneel-kop"><h3>Afgehandeld</h3></div>${rRest.length ? rRest.map(ruilItem).join('') : '<div class="leeg">Nog niets</div>'}</div>`;
+    } else if (sub === 'beschikbaar') {
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Personeel kan niet op…</h3></div><p class="zacht">Dit geven medewerkers zelf door. De planner houdt hier rekening mee bij het maken van een nieuw rooster.</p>
+        ${nb.length ? `<table class="lijst"><thead><tr><th>Datum</th><th>Wie</th><th>Wanneer</th><th>Opmerking</th></tr></thead><tbody>${nb.map(b => `<tr><td>${esc(A.datumKort(b.datum))}</td><td>${esc(A.mwNaam(b.medewerker_id))}</td><td>${esc(b.deel)}</td><td>${esc(b.opmerking || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="leeg">Niemand heeft iets doorgegeven</div>'}</div>`;
+    } else {
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Nieuwe aanvragen</h3><button class="knop klein" id="verlofInvoeren">+ Vrij invoeren</button></div>${vOpen.length ? vOpen.map(verlofItem).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen openstaande aanvragen</div>'}</div>
+        <div class="paneel"><div class="paneel-kop"><h3>Afgehandeld</h3></div>${vRest.length ? vRest.map(verlofItem).join('') : '<div class="leeg">Nog niets</div>'}</div>`;
+      $('#verlofInvoeren').onclick = verlofInvoeren;
+    }
+    inh.querySelectorAll('[data-goed]').forEach(b => b.onclick = () => verlofBeslissen(b.dataset.goed, true));
+    inh.querySelectorAll('[data-af]').forEach(b => b.onclick = () => verlofBeslissen(b.dataset.af, false));
+    inh.querySelectorAll('[data-rgoed]').forEach(b => b.onclick = () => A.bezig(b, () => ruilBeslissen(b.dataset.rgoed, true)));
+    inh.querySelectorAll('[data-raf]').forEach(b => b.onclick = () => A.bezig(b, () => ruilBeslissen(b.dataset.raf, false)));
+    inh.querySelectorAll('[data-rtoewijs]').forEach(b => b.onclick = () => { const r = d.ruilverzoeken.find(x => x.id === b.dataset.rtoewijs); const x = d.diensten.find(y => y.id === r.dienst_id); staat.maand = x.maand; dienstModal(x); });
+  }
+
+  // ---------------- ziekmeldingen ----------------
+  const meldtijdTekst = min => min == null ? '–' : min < 0 ? 'tijdens de dienst' : min < 60 ? min + ' min' : min < 1440 ? (Math.round(min / 6) / 10).toString().replace('.', ',') + ' uur' : Math.round(min / 1440) + ' dag(en)';
+
+  async function ziekBevestigen(id) {
+    const z = A.data.ziekmeldingen.find(x => x.id === id), m = A.mw(z.medewerker_id);
+    // diensten die vervallen: gekozen diensten + alle diensten vanaf 'van' t/m de komende 3 dagen
+    const ids = new Set(z.dienst_ids || []);
+    A.data.diensten.filter(x => x.medewerker_id === z.medewerker_id && x.datum >= z.van && x.datum <= G.addDays(G.today(), 3)).forEach(x => ids.add(x.id));
+    const ds = [...ids].map(i => A.data.diensten.find(x => x.id === i)).filter(x => x && x.medewerker_id === z.medewerker_id).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
+    const tmp = JSON.parse(JSON.stringify(A.data));
+    tmp.ziekmeldingen = tmp.ziekmeldingen.map(x => x.id === id ? { ...x, status: 'bevestigd' } : x);
+    const rij = x => {
+      const ctx = G.context(tmp, tmp.diensten.filter(y => y.id !== x.id));
+      const k = G.kandidaten(ctx, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.id !== z.medewerker_id).slice(0, 8);
+      return `<tr><td>${esc(A.datumKort(x.datum))}<br><small class="zacht">${tijd(x)} · ${esc(x.functie)}</small></td><td><select class="zVerv" data-d="${x.id}" style="min-width:170px">
+        <option value="">Open laten – collega's krijgen bericht</option>${k.map((c, i) => `<option value="${c.m.id}" ${i === 0 ? 'selected' : ''}>${esc(c.m.naam)}${c.redenen[0] ? ' (' + esc(c.redenen[0]) + ')' : ''}</option>`).join('')}</select></td></tr>`;
+    };
+    const res = await A.modal('Ziekmelding bevestigen', `<p><b>${esc(m.naam)}</b> is ziek vanaf ${esc(A.datumLang(z.van))}. Gemeld ${A.tijdGeleden(z.gemeld_op)}${z.minuten_voor_dienst != null ? ', ' + meldtijdTekst(z.minuten_voor_dienst) + ' voor de dienst' : ''}.</p>
+      ${ds.length ? `<p>Wie neemt deze diensten over?</p><table class="lijst"><tbody>${ds.map(rij).join('')}</tbody></table>` : '<p class="zacht">Er vallen geen diensten uit.</p>'}
+      <div class="veld" style="margin-top:1em"><label>Notitie (alleen voor jou)</label><input id="zNot" placeholder="bv. belde om 7:15"></div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Bevestigen', soort: 'ok', waarde: bg => ({ not: bg.querySelector('#zNot').value, verv: [...bg.querySelectorAll('.zVerv')].map(s => ({ d: s.dataset.d, m: s.value || null })) }) }]);
+    if (!res) return;
+    await Store.update('ziekmeldingen', id, { status: 'bevestigd', notitie_beheer: res.not, dienst_ids: [...new Set([...(z.dienst_ids || []), ...ds.map(x => x.id)])] });
+    let open = 0;
+    for (const v of res.verv) {
+      const x = A.data.diensten.find(y => y.id === v.d);
+      await Store.update('diensten', x.id, { medewerker_id: v.m });
+      const om = `${A.datumLang(x.datum)} van ${x.start} tot ${x.eind} (${A.LOC[x.locatie]}, ${x.functie})`;
+      if (v.m) await A.melding(v.m, `🙏 Je bent extra ingepland op ${om}, als vervanging.`);
+      else {
+        open++;
+        const ctx = G.context(tmp, tmp.diensten.filter(y => y.id !== x.id));
+        for (const k of G.kandidaten(ctx, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.id !== z.medewerker_id))
+          await A.melding(k.m.id, `🆘 Er is een open dienst door ziekte: ${om}. Kun jij? Pak hem op bij Mijn diensten.`);
+      }
+    }
+    await A.melding(z.medewerker_id, `Je ziekmelding is bevestigd. Beterschap! Meld je beter in de app zodra je weer kunt werken.`);
+    await herlaad(); opnieuw();
+    A.toast('Bevestigd' + (open ? ` – ${open} dienst(en) open, collega's hebben bericht gekregen` : ''), 'ok');
+  }
+
+  async function ziekAfwijzen(id) {
+    const z = A.data.ziekmeldingen.find(x => x.id === id), m = A.mw(z.medewerker_id);
+    const res = await A.modal('Ziekmelding afwijzen', `<p>Wijs de ziekmelding van <b>${esc(m.naam)}</b> af, bijvoorbeeld als die per ongeluk is gedaan. De diensten blijven dan staan.</p><div class="veld"><label>Reden (ziet de medewerker)</label><input id="zR" placeholder="bv. Je hebt niet gebeld, bel me even"></div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Afwijzen', soort: 'primair', waarde: bg => bg.querySelector('#zR').value }]);
+    if (res === null) return;
+    await Store.update('ziekmeldingen', id, { status: 'afgewezen', notitie_beheer: res });
+    await A.melding(z.medewerker_id, `Je ziekmelding is niet bevestigd${res ? ': ' + res : ''}. Je diensten blijven staan.`);
+    await herlaad(); opnieuw();
+  }
+
+  async function ziekBeter(id) {
+    const z = A.data.ziekmeldingen.find(x => x.id === id), m = A.mw(z.medewerker_id);
+    const res = await A.modal('Beter melden', `<p>Vanaf wanneer kan <b>${esc(m.naam)}</b> weer werken?</p><div class="veld"><input type="date" id="zB" value="${G.today()}" min="${z.van}"></div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Beter melden', soort: 'ok', waarde: bg => bg.querySelector('#zB').value || G.today() }]);
+    if (!res) return;
+    await Store.update('ziekmeldingen', id, { tot: G.addDays(res, -1) < z.van ? z.van : G.addDays(res, -1) });
+    await A.melding(z.medewerker_id, `Je bent beter gemeld. Welkom terug vanaf ${A.datumLang(res)}!`);
+    await herlaad(); opnieuw();
+  }
+
+  // ---------------- verzuimoverzicht ----------------
+  function verzuimStats(mid) {
+    const nu = G.today(), jaar = G.addDays(nu, -365), kwart = G.addDays(nu, -91);
+    const zs = A.data.ziekmeldingen.filter(z => z.medewerker_id === mid && z.status !== 'afgewezen' && z.van >= jaar).sort((a, b) => b.van.localeCompare(a.van));
+    const dagen = zs.reduce((t, z) => { const eind = !z.tot || z.tot > nu ? nu : z.tot; return t + Math.max(1, Math.round((G.parse(eind) - G.parse(z.van)) / 864e5) + 1); }, 0);
+    const met = zs.filter(z => z.minuten_voor_dienst != null);
+    const gem = met.length ? met.reduce((t, z) => t + z.minuten_voor_dienst, 0) / met.length : null;
+    const kort = met.filter(z => z.minuten_voor_dienst < 120).length;
+    const kwartN = zs.filter(z => z.van >= kwart).length;
+    const perDag = {}; zs.forEach(z => { const w = G.weekday(z.van); perDag[w] = (perDag[w] || 0) + 1; });
+    const vaakDag = Object.entries(perDag).find(([w, n]) => n >= 2 && zs.length >= 3 && n / zs.length >= .5);
+    const signalen = [];
+    if (zs.length >= 3 || kwartN >= 2) signalen.push('<span class="label fout">gesprek aanbevolen</span>');
+    if (kort >= 2) signalen.push('<span class="label let">vaak kort van tevoren</span>');
+    if (vaakDag) signalen.push(`<span class="label let">vaak op ${A.DAGEN[vaakDag[0]]}</span>`);
+    return { zs, n: zs.length, kwartN, dagen, gem, kort, diensten: zs.reduce((t, z) => t + (z.dienst_ids || []).length, 0), signalen };
+  }
+
+  function pVerzuim() {
+    const rijen = A.data.medewerkers.filter(m => m.actief !== false).map(m => ({ m, ...verzuimStats(m.id) })).sort((a, b) => b.n - a.n || b.dagen - a.dagen || a.m.naam.localeCompare(b.m.naam));
+    const totaal = rijen.reduce((t, r) => t + r.n, 0);
+    hoofd.innerHTML = `<div class="kop"><h1>Verzuim</h1><a class="knop" href="#aanvragen/ziek">Ziekmeldingen</a></div>
+      <p class="zacht">Overzicht van de afgelopen 12 maanden. Zo zie je snel wie zich vaak ziek meldt, of vaak kort voor de dienst. Klik op een naam voor de details en om een gesprek vast te leggen.</p>
+      <div class="tegels"><div class="tegel"><div class="getal">${totaal}</div><div class="wat">ziekmeldingen (12 mnd)</div></div>
+        <div class="tegel"><div class="getal">${A.data.ziekmeldingen.filter(z => z.status === 'bevestigd' && (!z.tot || z.tot >= G.today())).length}</div><div class="wat">nu ziek</div></div>
+        <div class="tegel ${rijen.some(r => r.signalen.length) ? 'aandacht' : ''}"><div class="getal">${rijen.filter(r => r.signalen.length).length}</div><div class="wat">medewerkers met een signaal</div></div></div>
+      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Medewerker</th><th>Meldingen</th><th>Laatste 3 mnd</th><th>Ziektedagen</th><th>Gemiste diensten</th><th>Gem. gemeld vooraf</th><th>Laatste melding</th><th>Signaal</th></tr></thead><tbody>
+      ${rijen.map(r => `<tr class="klik" data-vz="${r.m.id}"><td><span class="stip" style="background:${esc(r.m.kleur)}"></span> <b>${esc(r.m.naam)}</b></td><td>${r.n || '<span class="zacht">0</span>'}</td><td>${r.kwartN || '<span class="zacht">0</span>'}</td><td>${r.dagen || '<span class="zacht">0</span>'}</td><td>${r.diensten || '<span class="zacht">0</span>'}</td>
+        <td>${r.gem == null ? '<span class="zacht">–</span>' : meldtijdTekst(Math.round(r.gem))}${r.kort ? ` <small class="zacht">(${r.kort}× &lt; 2 uur)</small>` : ''}</td><td>${r.zs[0] ? esc(A.datumKort(r.zs[0].van)) : '<span class="zacht">–</span>'}</td><td>${r.signalen.join(' ')}</td></tr>`).join('')}
+      </tbody></table></div><p class="zacht" style="font-size:.85rem;margin:.8em 0 0">Signalen: <b>gesprek aanbevolen</b> bij 3 of meer meldingen in een jaar, of 2 in drie maanden. <b>Vaak kort van tevoren</b> bij 2 of meer meldingen minder dan 2 uur voor de dienst. De app legt bewust géén ziekteoorzaak vast; dat mag een werkgever niet registreren.</p></div>`;
+    hoofd.querySelectorAll('[data-vz]').forEach(r => r.onclick = () => verzuimDetail(r.dataset.vz));
+  }
+
+  async function verzuimDetail(mid) {
+    const m = A.mw(mid), st = verzuimStats(mid);
+    const alle = A.data.ziekmeldingen.filter(z => z.medewerker_id === mid).sort((a, b) => b.van.localeCompare(a.van));
+    const res = await A.modal('Verzuim ' + m.naam, `
+      <div class="rij" style="margin-bottom:.8em"><div><div style="font-size:1.5rem;font-weight:800">${st.n}</div><small class="zacht">meldingen (12 mnd)</small></div><div><div style="font-size:1.5rem;font-weight:800">${st.dagen}</div><small class="zacht">ziektedagen</small></div><div><div style="font-size:1.5rem;font-weight:800">${st.gem == null ? '–' : meldtijdTekst(Math.round(st.gem))}</div><small class="zacht">gem. vooraf gemeld</small></div></div>
+      ${st.signalen.length ? `<p>${st.signalen.join(' ')}</p>` : ''}
+      ${alle.length ? `<table class="lijst"><thead><tr><th>Datum</th><th>Duur</th><th>Gemeld vooraf</th><th>Status</th></tr></thead><tbody>${alle.map(z => { const eind = !z.tot || z.tot > G.today() ? null : z.tot; const d = eind ? Math.round((G.parse(eind) - G.parse(z.van)) / 864e5) + 1 : null;
+        return `<tr><td>${esc(A.datumKort(z.van))}${z.notitie_beheer ? `<br><small class="zacht">${esc(z.notitie_beheer)}</small>` : ''}</td><td>${d ? d + ' dag' + (d > 1 ? 'en' : '') : '<span class="label fout">nog ziek</span>'}</td><td>${meldtijdTekst(z.minuten_voor_dienst)}</td><td><span class="label ${z.status === 'bevestigd' ? 'ok' : z.status === 'gemeld' ? 'let' : 'fout'}">${z.status}</span></td></tr>`; }).join('')}</tbody></table>` : '<p class="zacht">Nog nooit ziek gemeld.</p>'}
+      <div class="veld" style="margin-top:1em"><label>Gesprekken en afspraken <small>(alleen voor jou)</small></label><textarea id="vzNot" rows="5" placeholder="bv. 12-11: gesprek gehad over vaak ziek op zondag. Afspraak: …">${esc(m.notitie || '')}</textarea>
+        <button class="knop klein plat" id="vzDatum" type="button" style="margin-top:.3em">+ Gesprek van vandaag toevoegen</button></div>`,
+      [{ label: 'Sluiten', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => bg.querySelector('#vzNot').value }],
+      bg => { bg.querySelector('#vzDatum').onclick = () => { const t = bg.querySelector('#vzNot'); const d = new Date(); t.value = (t.value ? t.value.replace(/\s*$/, '') + '\n' : '') + d.getDate() + '-' + (d.getMonth() + 1) + '-' + d.getFullYear() + ': gesprek gehad over verzuim. Afspraak: '; t.focus(); }; });
+    if (res === null || res === undefined) return;
+    await Store.update('medewerkers', mid, { notitie: res });
+    await herlaad(); A.toast('Opgeslagen', 'ok');
+  }
+
+  async function verlofInvoeren() {
+    const res = await A.modal('Vrij invoeren', `
+      <div class="veld"><label>Medewerker</label><select id="vMw">${actieveMw().map(m => `<option value="${m.id}">${esc(m.naam)}</option>`).join('')}</select></div>
+      <div class="rij"><div class="veld"><label>Van</label><input type="date" id="vVan" value="${G.today()}"></div><div class="veld"><label>Tot en met</label><input type="date" id="vTot" value="${G.today()}"></div></div>
+      <div class="veld"><label>Reden</label><input id="vReden" placeholder="bv. vakantie"></div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Opslaan als goedgekeurd', soort: 'primair', controle: bg => bg.querySelector('#vTot').value < bg.querySelector('#vVan').value ? 'Einddatum ligt voor begindatum' : null, waarde: bg => ({ medewerker_id: bg.querySelector('#vMw').value, van: bg.querySelector('#vVan').value, tot: bg.querySelector('#vTot').value, reden: bg.querySelector('#vReden').value }) }]);
+    if (!res) return;
+    const [v] = await Store.insert('verlof', { ...res, status: 'aangevraagd', reactie: '', aangevraagd_op: new Date().toISOString() });
+    await herlaad();
+    await verlofBeslissen(v.id, true, true);
+  }
+
+  async function verlofBeslissen(id, goed, stil) {
+    const v = A.data.verlof.find(x => x.id === id), m = A.mw(v.medewerker_id);
+    const conflicten = A.data.diensten.filter(x => x.medewerker_id === v.medewerker_id && x.datum >= v.van && x.datum <= v.tot).sort((a, b) => a.datum.localeCompare(b.datum));
+    let html = `<p><b>${esc(m.naam)}</b>: ${esc(A.datumLang(v.van))}${v.tot !== v.van ? ' t/m ' + esc(A.datumLang(v.tot)) : ''}</p>`;
+    let plan = [];
+    if (goed && conflicten.length) {
+      // vervangers zoeken, rekening houdend met elkaar
+      const tmp = JSON.parse(JSON.stringify(A.data));
+      tmp.verlof = tmp.verlof.map(x => x.id === id ? { ...x, status: 'goedgekeurd' } : x);
+      for (const c of conflicten) {
+        const dd = tmp.diensten.find(x => x.id === c.id); dd.medewerker_id = null;
+        const verv = G.vervanger(dd, tmp, [v.medewerker_id]);
+        if (verv) dd.medewerker_id = verv.id;
+        plan.push({ dienst: c, verv });
+      }
+      html += `<p>${esc(m.naam)} staat in deze periode ${conflicten.length}× ingepland. Deze diensten worden automatisch opnieuw ingevuld:</p>
+        <table class="lijst"><tbody>${plan.map(p => `<tr><td>${esc(A.datumKort(p.dienst.datum))}</td><td>${tijd(p.dienst)}</td><td>${esc(p.dienst.functie)}</td><td>${p.verv ? '→ <b>' + esc(p.verv.naam) + '</b>' : '<span class="label fout">open</span>'}</td></tr>`).join('')}</tbody></table>`;
+    }
+    html += `<div class="veld" style="margin-top:1em"><label>Bericht aan ${esc(m.naam)} (optioneel)</label><input id="vReactie" placeholder="${goed ? 'Veel plezier!' : 'Helaas, het is die dag erg druk…'}"></div>`;
+    const res = stil && !conflicten.length ? { reactie: '' } : await A.modal(goed ? 'Vrij goedkeuren' : 'Vrij afwijzen', html, [{ label: 'Annuleren', waarde: null }, { label: goed ? 'Goedkeuren' : 'Afwijzen', soort: goed ? 'ok' : 'primair', waarde: bg => ({ reactie: bg.querySelector('#vReactie').value }) }]);
+    if (!res) { if (stil) { await Store.update('verlof', id, { status: 'goedgekeurd' }); await herlaad(); opnieuw(); } return; }
+    await Store.update('verlof', id, { status: goed ? 'goedgekeurd' : 'afgewezen', reactie: res.reactie });
+    if (!stil) await A.melding(v.medewerker_id, `Je vrij-aanvraag voor ${A.datumKort(v.van)}${v.tot !== v.van ? ' t/m ' + A.datumKort(v.tot) : ''} is ${goed ? 'goedgekeurd ✅' : 'afgewezen ❌'}${res.reactie ? ': ' + res.reactie : ''}`);
+    for (const p of plan) {
+      await Store.update('diensten', p.dienst.id, { medewerker_id: p.verv ? p.verv.id : null });
+      if (p.verv) await meldDienst(p.dienst, p.verv.id, `Je bent extra ingepland op ${A.datumLang(p.dienst.datum)} van ${p.dienst.start} tot ${p.dienst.eind} (${A.LOC[p.dienst.locatie]}, ${p.dienst.functie}).`);
+    }
+    await herlaad(); opnieuw();
+    A.toast(goed ? 'Goedgekeurd' : 'Afgewezen', 'ok');
+  }
+
+  async function ruilBeslissen(id, goed) {
+    const r = A.data.ruilverzoeken.find(x => x.id === id), x = A.data.diensten.find(y => y.id === r.dienst_id);
+    const t = r.terug_dienst_id && A.data.diensten.find(y => y.id === r.terug_dienst_id);
+    const omschr = `${A.datumLang(x.datum)} (${x.start}–${x.eind})`;
+    if (goed) {
+      await A.voerRuilUit(r);
+      const tOm = t ? `${A.datumLang(t.datum)} (${t.start}–${t.eind})` : '';
+      await A.melding(r.van_id, `✅ Je ruil is goedgekeurd: ${A.mwNaam(r.naar_id)} neemt je dienst op ${omschr} over.` + (t ? ` Jij werkt nu op ${tOm}.` : ''));
+      await A.melding(r.naar_id, `✅ Goedgekeurd: je werkt op ${omschr} in plaats van ${A.mwNaam(r.van_id)}.` + (t ? ` Je dienst op ${tOm} is nu van ${A.mwNaam(r.van_id)}.` : ''));
+    } else {
+      await Store.update('ruilverzoeken', id, { status: 'afgewezen' });
+      await A.melding(r.van_id, `Je ruil voor ${omschr} is niet goedgekeurd door de baas. Je dienst blijft staan.`);
+      await A.melding(r.naar_id, `De ruil voor ${omschr} is niet goedgekeurd door de baas. Er verandert niets aan jouw diensten.`);
+    }
+    await herlaad(); pAanvragen();
+  }
+
+  // =====================================================================
+  //  ZALENCENTRUM
+  // =====================================================================
+  // ---------- uitvraag-hulpjes ----------
+  function uitvraagStand(e) {
+    const groep = G.uitvraagGroep(e, A.data);
+    const reac = A.data.event_reacties.filter(r => r.event_id === e.id);
+    const kan = reac.filter(r => r.kan).length, kanNiet = reac.filter(r => !r.kan).length;
+    return { groep, reac, kan, kanNiet, geen: groep.filter(m => !reac.some(r => r.medewerker_id === m.id)).length };
+  }
+  function uitvraagLabel(e) {
+    if (e.status !== 'open') return '';
+    const st = uitvraagStand(e);
+    return `<span class="label let" title="Reacties oproepkrachten">⏳ uitvraag t/m ${esc(A.datumKort(e.uitvraag_tot))} · ${st.kan} kan, ${st.kanNiet} niet, ${st.geen} geen reactie</span>`;
+  }
+  function deelUitvraagWhatsApp(events) {
+    const lijst = events.sort((a, b) => a.datum.localeCompare(b.datum)).map(e => `• ${Uitvraag.datumTekst(e.datum)} ${e.start}–${e.eind}: ${e.naam}`).join('\n');
+    const tot = events.map(e => e.uitvraag_tot).sort()[0];
+    const tekst = `🎉 Nieuwe feesten in het zalencentrum!\n${lijst}\n\nOproepkrachten: geef vóór ${Uitvraag.datumTekst(tot)} in de app aan op welke datums je kunt:\n${siteUrl()}\n\nHet maakt niet uit wie het eerst reageert, het werk wordt eerlijk verdeeld.`;
+    return A.modal('Uitvraag delen via WhatsApp', `<p>De oproepkrachten hebben al een melding in de app gekregen. Wil je het ook in de WhatsApp-groep zetten?</p><textarea id="waTekst" rows="9">${esc(tekst)}</textarea>`,
+      [{ label: 'Niet nu', waarde: null }, { label: '💬 Open WhatsApp', soort: 'ok', waarde: bg => { window.open('https://wa.me/?text=' + encodeURIComponent(bg.querySelector('#waTekst').value), '_blank'); return true; } }]);
+  }
+
+  // ---------- meerdere feesten in één keer, één bericht per oproepkracht ----------
+  async function meerdereFeesten() {
+    const nu = G.today(), dagenUit = +A.data.instellingen.uitvraag_dagen || 7;
+    const bezTekst = g => standaardBezetting(g).map(b => b.aantal + '× ' + b.functie).join(', ');
+    const rij = (r) => `<div class="mf-rij" style="border:1px solid var(--lijn);border-radius:10px;padding:.6em .7em .4em;margin-bottom:.5em;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:.4em .5em;align-items:end">
+        <div><label>Datum</label><input type="date" class="mDatum" value="${esc(r.datum)}" min="${nu}"></div>
+        <div style="grid-column:span 2"><label>Naam</label><input class="mNaam" value="${esc(r.naam || '')}" placeholder="bv. Bruiloft Jansen"></div>
+        <button class="icoon mWeg" type="button" title="Verwijderen" style="margin-bottom:.3em">✕</button>
+        <div><label>Van</label><input type="time" class="mStart" value="${esc(r.start)}"></div>
+        <div><label>Tot</label><input type="time" class="mEind" value="${esc(r.eind)}"></div>
+        <div><label>Gasten</label><input type="number" class="mGasten" value="${esc(r.gasten)}" min="0"></div><span></span>
+        <small class="zacht mBez" style="grid-column:1/-1">👥 ${esc(bezTekst(r.gasten))}</small></div>`;
+    const zat = (() => { let d = G.addDays(nu, 14); while (G.weekday(d) !== 5) d = G.addDays(d, 1); return d; })();
+    const html = `<p class="zacht" style="margin-top:-.3em">Zet alle nieuwe feesten in één keer in. De oproepkrachten krijgen <b>één bericht</b> met alle datums waarop ze kunnen werken.</p>
+      <div id="mRijen">${rij({ datum: zat, start: '19:00', eind: '00:30', gasten: 80 })}</div>
+      <button class="knop klein" id="mRij" type="button">+ Nog een feest</button>
+      <p class="zacht" style="font-size:.82rem">De bezetting wordt voorgesteld op basis van het aantal gasten. Daarna kun je per feest nog aanpassen.</p>
+      <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em;margin-top:.6em">
+        <label class="check"><input type="checkbox" id="mUit" checked> Oproepkrachten laten reageren (uitvraag)</label>
+        <div id="mUitWrap" style="margin-top:.5em"><label>Reageren kan tot en met</label><input type="date" id="mUitTot" value="${esc(G.addDays(nu, dagenUit))}" style="max-width:200px">
+        <small class="zacht" style="display:block;margin-top:.3em">Ligt een feest eerder, dan stopt de termijn voor dat feest vanzelf 2 dagen ervoor.</small></div></div>`;
+    const lees = bg => [...bg.querySelectorAll('.mf-rij')].map(r => ({ datum: r.querySelector('.mDatum').value, naam: r.querySelector('.mNaam').value.trim(), start: r.querySelector('.mStart').value, eind: r.querySelector('.mEind').value, gasten: +r.querySelector('.mGasten').value || 0 }));
+    const res = await A.modal('Meerdere feesten toevoegen', html, [{ label: 'Annuleren', waarde: null }, {
+      label: 'Opslaan', soort: 'primair',
+      controle: bg => { const rs = lees(bg); if (!rs.length) return 'Voeg minstens één feest toe'; if (rs.some(r => !r.datum || !r.naam)) return 'Vul bij elk feest een datum en naam in'; if (rs.some(r => r.datum < nu)) return 'Er staat een datum in het verleden'; return null; },
+      waarde: bg => ({ rijen: lees(bg), uitvraag: bg.querySelector('#mUit').checked, tot: bg.querySelector('#mUitTot').value })
+    }], bg => {
+      const koppel = () => bg.querySelectorAll('.mf-rij').forEach(r => {
+        r.querySelector('.mWeg').onclick = () => r.remove();
+        r.querySelector('.mGasten').oninput = () => { r.querySelector('.mBez').textContent = '👥 ' + bezTekst(r.querySelector('.mGasten').value); };
+      });
+      koppel();
+      bg.querySelector('#mRij').onclick = () => {
+        const rs = lees(bg), laatst = rs[rs.length - 1] || { datum: zat, start: '19:00', eind: '00:30', gasten: 80 };
+        bg.querySelector('#mRijen').insertAdjacentHTML('beforeend', rij({ ...laatst, naam: '', datum: laatst.datum ? G.addDays(laatst.datum, 7) : zat }));
+        koppel(); const n = bg.querySelectorAll('.mNaam'); n[n.length - 1].focus();
+      };
+      bg.querySelector('#mUit').onchange = e => { bg.querySelector('#mUitWrap').style.display = e.target.checked ? '' : 'none'; };
+    });
+    if (!res) return;
+    const events = res.rijen.map(r => {
+      let tot = null;
+      if (res.uitvraag) { tot = res.tot || G.addDays(nu, dagenUit); const max = G.addDays(r.datum, -2); if (tot > max) tot = max < nu ? nu : max; }
+      return { id: Store.uuid(), datum: r.datum, naam: r.naam, zaal: '', start: r.start || '19:00', eind: r.eind || '00:30', gasten: r.gasten, bezetting: standaardBezetting(r.gasten), notitie: '',
+        uitvraag: res.uitvraag, uitvraag_tot: tot, status: res.uitvraag ? 'open' : null, herinnerd: false };
+    }).sort((a, b) => a.datum.localeCompare(b.datum));
+    await Store.insert('zalen_events', events);
+    await herlaad();
+    if (res.uitvraag) {
+      // één bericht per oproepkracht met alle feesten waarvoor hij of zij in aanmerking komt
+      const perMw = {};
+      for (const e of events) for (const m of G.uitvraagGroep(e, A.data)) (perMw[m.id] = perMw[m.id] || []).push(e);
+      for (const [mid, lijst] of Object.entries(perMw)) {
+        const eerste = lijst.map(e => e.uitvraag_tot).sort()[0];
+        await A.melding(mid, `🎉 ${lijst.length > 1 ? lijst.length + ' nieuwe feesten' : 'Nieuw feest'} in het zalencentrum: ` + lijst.map(e => `${A.datumKort(e.datum)} ${e.start}–${e.eind} (${e.naam})`).join('; ') + `. Geef bij "Kun jij op deze feesten?" aan op welke datums je kunt, graag vóór ${A.datumLang(eerste)}.`);
+      }
+      await herlaad(); opnieuw();
+      A.toast(`${events.length} feesten opgeslagen – ${Object.keys(perMw).length} oproepkracht(en) kregen één bericht`, 'ok');
+      deelUitvraagWhatsApp(events);
+    } else {
+      // zonder uitvraag: inplannen als er al een maandrooster is
+      let n = 0;
+      for (const e of events) if (A.rooster(G.monthOf(e.datum))) { await herplanEvent(A.event(e.id), []); n++; }
+      await herlaad(); opnieuw();
+      A.toast(`${events.length} feesten opgeslagen${n ? ', ' + n + ' meteen ingepland' : ''}`, 'ok');
+    }
+  }
+
+  // Gecontroleerde feesten versturen naar het personeel
+  async function verstuurEvents(events) {
+    const html = `<p>Deze feesten zijn ingepland en wachten op jouw controle. Na versturen krijgt iedereen die is ingeroosterd een melding. Oproepkrachten die "kan" zeiden maar niet nodig zijn, krijgen ook bericht.</p>
+      ${events.map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id).sort((a, b) => a.functie.localeCompare(b.functie));
+        return `<label class="check" style="align-items:flex-start;margin:.7em 0"><input type="checkbox" value="${e.id}" checked style="margin-top:.3em"><span><b>${esc(e.naam)}</b> · ${esc(A.datumKort(e.datum))}<br><small class="zacht">${ds.map(x => esc(x.functie) + ': ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</small></span></label>`; }).join('')}
+      <p class="zacht" style="font-size:.85rem">Iets aanpassen? Sluit dit venster en klik in het rooster op een dienst.</p>`;
+    const ids = await A.modal('Feesten versturen', html, [{ label: 'Annuleren', waarde: null }, { label: '📤 Versturen', soort: 'ok', waarde: bg => [...bg.querySelectorAll('input:checked')].map(i => i.value) }]);
+    if (!ids || !ids.length) return;
+    const n = await Uitvraag.publiceerEvents(Store, A.data, A.data.zalen_events.filter(e => ids.includes(e.id)));
+    await herlaad(); opnieuw();
+    A.toast(`Verstuurd – ${n} melding(en) naar het personeel`, 'ok');
+  }
+
+  function pZalen() {
+    const nu = G.today();
+    const evs = A.data.zalen_events.filter(e => staat.zalenVerleden ? e.datum < nu : e.datum >= nu)
+      .sort((a, b) => staat.zalenVerleden ? b.datum.localeCompare(a.datum) : a.datum.localeCompare(b.datum));
+    const perMaand = {};
+    evs.forEach(e => (perMaand[G.monthOf(e.datum)] = perMaand[G.monthOf(e.datum)] || []).push(e));
+    const lopend = A.data.zalen_events.filter(e => e.status === 'open');
+    const concepten = A.data.zalen_events.filter(e => e.status === 'concept').sort((a, b) => a.datum.localeCompare(b.datum));
+    // verdeling oproepkrachten (afgelopen 3 maanden t/m alles wat gepland staat)
+    const van = G.addDays(nu, -90);
+    const oproep = A.data.medewerkers.filter(m => m.actief !== false && G.isOproep(m) && (m.locaties || []).includes('zalen'));
+    const verdeling = oproep.map(m => { const ds = A.data.diensten.filter(d => d.medewerker_id === m.id && d.datum >= van);
+      return { m, n: ds.length, u: ds.reduce((t, d) => t + G.hours(d.start, d.eind), 0), kan: A.data.event_reacties.filter(r => r.medewerker_id === m.id && r.kan).length, gereageerd: A.data.event_reacties.filter(r => r.medewerker_id === m.id).length }; })
+      .sort((a, b) => b.u - a.u);
+    const maxU = Math.max(1, ...verdeling.map(v => v.u));
+
+    hoofd.innerHTML = `<div class="kop"><h1>Zalencentrum</h1><div class="acties">
+        <label class="check"><input type="checkbox" id="verleden" ${staat.zalenVerleden ? 'checked' : ''}> Afgelopen feesten</label>
+        ${lopend.length ? '<button class="knop" id="deelUitvraag">💬 Uitvraag delen</button>' : ''}
+        ${concepten.length ? `<button class="knop ok" id="verstuurEvents">📤 Versturen (${concepten.length})</button>` : ''}
+        <button class="knop" id="nieuwEvs">+ Meerdere feesten</button>
+        <button class="knop primair" id="nieuwEv">+ Feest toevoegen</button></div></div>
+      <p class="zacht">Zet hier alle feesten in. Met <b>uitvraag</b> krijgen de oproepkrachten een melding en ${esc(A.data.instellingen.uitvraag_dagen || 7)} dagen om te laten weten of ze kunnen. Daarna wordt het feest automatisch ingepland: eerst vast personeel (tot hun contracturen), daarna de oproepkrachten eerlijk verdeeld.</p>
+      ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${A.rooster(m) ? `<span class="label ${A.isGepubliceerd(m) ? 'ok' : 'let'}">rooster ${A.isGepubliceerd(m) ? "verstuurd" : "concept"}</span>` : '<span class="label">nog geen maandrooster</span>'}</div>
+        ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
+          const status = e.status === 'open' ? uitvraagLabel(e) : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
+          return `<div class="item klik" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+          <div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten${e.zaal ? ' · ' + esc(e.zaal) : ''} · ${(e.bezetting || []).map(b => b.aantal + '× ' + esc(b.functie)).join(', ') || '<span style="color:var(--fout)">geen bezetting opgegeven</span>'}</div>
+          ${ds.filter(x => x.medewerker_id).length ? `<div class="meta">👥 ${ds.filter(x => x.medewerker_id).map(x => esc(A.mwNaam(x.medewerker_id))).join(', ')}</div>` : ''}</div>
+          <div class="rechts">${status}</div></div>`; }).join('')}</div>`).join('')
+        : `<div class="paneel"><div class="leeg"><span class="groot">🎉</span>${staat.zalenVerleden ? 'Geen afgelopen feesten' : 'Nog geen feesten gepland'}</div></div>`}
+      ${verdeling.length ? `<div class="paneel"><div class="paneel-kop"><h3>Verdeling oproepkrachten</h3><small class="zacht">afgelopen 3 maanden + wat al gepland staat</small></div>
+        <table class="lijst"><thead><tr><th>Oproepkracht</th><th>Diensten</th><th>Uren</th><th style="width:35%"></th><th>Zei 'kan'</th></tr></thead><tbody>
+        ${verdeling.map(v => `<tr><td><span class="stip" style="background:${esc(v.m.kleur)}"></span> <b>${esc(v.m.naam)}</b></td><td>${v.n}</td><td>${A.uren(v.u)}</td><td><div class="balk"><i style="width:${v.u / maxU * 100}%;background:var(--zaal)"></i></div></td><td>${v.kan}×</td></tr>`).join('')}
+        </tbody></table><p class="zacht" style="font-size:.85rem;margin:.6em 0 0">Wie minder heeft gewerkt, krijgt bij de volgende feesten voorrang, mits hij of zij heeft aangegeven te kunnen.</p></div>` : ''}`;
+    $('#nieuwEv').onclick = () => eventModal(null);
+    $('#nieuwEvs').onclick = () => meerdereFeesten();
+    $('#verleden').onchange = e => { staat.zalenVerleden = e.target.checked; pZalen(); };
+    if ($('#deelUitvraag')) $('#deelUitvraag').onclick = () => deelUitvraagWhatsApp(lopend);
+    if ($('#verstuurEvents')) $('#verstuurEvents').onclick = () => verstuurEvents(concepten);
+    hoofd.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
+  }
+
+  function standaardBezetting(gasten, start, eind) {
+    const g = +gasten || 0;
+    const b = [{ functie: 'Bediening', aantal: Math.max(1, Math.ceil(g / 40)) }, { functie: 'Bar', aantal: Math.max(1, Math.ceil(g / 80)) }];
+    if (g >= 50) b.push({ functie: 'Afwas', aantal: 1 });
+    return b.filter(x => (A.data.instellingen.functies || []).includes(x.functie));
+  }
+
+  async function eventModal(ev) {
+    const nieuw = !ev;
+    const nu = G.today(), dagenUit = +A.data.instellingen.uitvraag_dagen || 7;
+    const e = ev ? JSON.parse(JSON.stringify(ev)) : { id: Store.uuid(), datum: G.addDays(nu, 14), naam: '', zaal: '', start: '19:00', eind: '00:30', gasten: '', bezetting: [], notitie: '', uitvraag: true, uitvraag_tot: null, status: null, herinnerd: false };
+    const rijHtml = (b, i) => `<div class="rij bez-rij" data-i="${i}" style="grid-template-columns:1.4fr .6fr .8fr .8fr auto;align-items:end;gap:.4em">
+        <div class="veld" style="margin:0 0 .5em"><select class="bFn">${functieOpties(b.functie)}</select></div>
+        <div class="veld" style="margin:0 0 .5em"><input type="number" min="0" class="bAantal" value="${esc(b.aantal || 1)}" title="aantal"></div>
+        <div class="veld" style="margin:0 0 .5em"><input type="time" class="bStart" value="${esc(b.start || '')}" title="afwijkende begintijd"></div>
+        <div class="veld" style="margin:0 0 .5em"><input type="time" class="bEind" value="${esc(b.eind || '')}" title="afwijkende eindtijd"></div>
+        <button class="icoon bWeg" style="margin-bottom:.5em" title="verwijderen">✕</button></div>`;
+    // reacties-overzicht bij bestaande uitvraag
+    let reactieHtml = '';
+    if (!nieuw && e.uitvraag) {
+      const st = uitvraagStand(e);
+      const regel = m => { const r = st.reac.find(r => r.medewerker_id === m.id); return `<div class="item" style="padding:.35em 0"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}</span></div>`; };
+      reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
+        <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
+        ${e.status === 'concept' || e.status === 'ingepland' ? `<div class="meta" style="margin-bottom:.4em">${e.status === 'concept' ? '<b>Ingepland, nog niet verstuurd:</b> ' : '<b>Ingepland:</b> '}${A.data.diensten.filter(x => x.event_id === e.id).map(x => esc(x.functie) + ' ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</div>` : ''}
+        ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
+        ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">"Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
+    }
+    const uitvraagHtml = (nieuw || e.status === 'open' || !e.status) ? `
+      <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em">
+        <label class="check"><input type="checkbox" id="eUitvraag" ${e.uitvraag ? 'checked' : ''} ${!nieuw && e.status === 'open' ? 'disabled' : ''}> Oproepkrachten laten reageren (uitvraag)</label>
+        <div id="eUitWrap" style="margin-top:.5em;${e.uitvraag ? '' : 'display:none'}"><label>Reageren kan tot en met</label><input type="date" id="eUitTot" value="${esc(e.uitvraag_tot || U_standaard(e.datum))}" style="max-width:200px">
+        <small class="zacht" style="display:block;margin-top:.3em">Daarna wordt het feest automatisch ingepland. Zet je meerdere feesten tegelijk in, dan worden ze samen verdeeld.</small></div></div>` : '';
+    function U_standaard(datum) { return Uitvraag.standaardTermijn(datum, dagenUit, nu); }
+    const html = `
+      <div class="veld"><label>Naam van het feest</label><input id="eNaam" value="${esc(e.naam)}" placeholder="bv. Bruiloft Jansen"></div>
+      <div class="rij"><div class="veld"><label>Datum</label><input type="date" id="eDatum" value="${esc(e.datum)}"></div>
+        <div class="veld"><label>Van</label><input type="time" id="eStart" value="${esc(e.start)}"></div><div class="veld"><label>Tot</label><input type="time" id="eEind" value="${esc(e.eind)}"></div></div>
+      <div class="rij"><div class="veld"><label>Aantal gasten</label><input type="number" id="eGasten" value="${esc(e.gasten)}"></div><div class="veld"><label>Zaal</label><input id="eZaal" value="${esc(e.zaal || '')}" placeholder="bv. Grote zaal"></div></div>
+      <div class="veld"><label style="display:flex;justify-content:space-between;align-items:center">Benodigd personeel <button class="knop klein plat" id="eStandaard" type="button">✨ Voorstel op basis van gasten</button></label>
+        <div class="rij" style="grid-template-columns:1.4fr .6fr .8fr .8fr auto;gap:.4em;font-size:.75rem;color:var(--zacht);font-weight:700"><span>Functie</span><span>Aantal</span><span>Begin*</span><span>Eind*</span><span></span></div>
+        <div id="bezRijen">${(e.bezetting || []).map(rijHtml).join('')}</div>
+        <button class="knop klein" id="eRij" type="button">+ Functie</button> <small class="zacht">* alleen invullen als het afwijkt van de feesttijden</small></div>
+      ${uitvraagHtml}
+      ${reactieHtml}
+      <div class="veld"><label>Notitie</label><textarea id="eNot" placeholder="Bijzonderheden, menu, contactpersoon…">${esc(e.notitie || '')}</textarea></div>`;
+    const leesBez = bg => [...bg.querySelectorAll('.bez-rij')].map(r => ({ functie: r.querySelector('.bFn').value, aantal: +r.querySelector('.bAantal').value || 0, start: r.querySelector('.bStart').value || undefined, eind: r.querySelector('.bEind').value || undefined })).filter(b => b.aantal > 0);
+    const knoppen = [];
+    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
+    knoppen.push({ label: 'Annuleren', waarde: null }, {
+      label: 'Opslaan', soort: 'primair',
+      controle: bg => {
+        if (!bg.querySelector('#eNaam').value.trim()) return 'Geef het feest een naam';
+        if (!bg.querySelector('#eDatum').value) return 'Kies een datum';
+        const u = bg.querySelector('#eUitvraag');
+        if (u && u.checked && (!bg.querySelector('#eUitTot').value || bg.querySelector('#eUitTot').value >= bg.querySelector('#eDatum').value)) return 'De reactietermijn moet vóór de feestdatum eindigen';
+        return null;
+      },
+      waarde: bg => {
+        const u = bg.querySelector('#eUitvraag');
+        const r = { ...e, naam: bg.querySelector('#eNaam').value.trim(), datum: bg.querySelector('#eDatum').value, start: bg.querySelector('#eStart').value, eind: bg.querySelector('#eEind').value, gasten: +bg.querySelector('#eGasten').value || 0, zaal: bg.querySelector('#eZaal').value, notitie: bg.querySelector('#eNot').value, bezetting: leesBez(bg) };
+        if (u) { r.uitvraag = u.checked; r.uitvraag_tot = u.checked ? bg.querySelector('#eUitTot').value : null; }
+        return r;
+      }
+    });
+    const res = await A.modal(nieuw ? 'Feest toevoegen' : 'Feest bewerken', html, knoppen, bg => {
+      const koppel = () => bg.querySelectorAll('.bWeg').forEach(b => b.onclick = ev2 => { ev2.preventDefault(); b.closest('.bez-rij').remove(); });
+      koppel();
+      bg.querySelector('#eRij').onclick = () => { bg.querySelector('#bezRijen').insertAdjacentHTML('beforeend', rijHtml({ functie: 'Bediening', aantal: 1 }, 0)); koppel(); };
+      bg.querySelector('#eStandaard').onclick = () => { bg.querySelector('#bezRijen').innerHTML = standaardBezetting(bg.querySelector('#eGasten').value).map(rijHtml).join(''); koppel(); };
+      if (nieuw) bg.querySelector('#eGasten').addEventListener('change', () => { if (!bg.querySelectorAll('.bez-rij').length) bg.querySelector('#eStandaard').click(); });
+      const u = bg.querySelector('#eUitvraag');
+      if (u) {
+        u.onchange = () => { bg.querySelector('#eUitWrap').style.display = u.checked ? '' : 'none'; };
+        if (nieuw) bg.querySelector('#eDatum').addEventListener('change', () => { bg.querySelector('#eUitTot').value = U_standaard(bg.querySelector('#eDatum').value); });
+      }
+      const ve = bg.querySelector('#eVersturen');
+      if (ve) ve.onclick = () => A.bezig(ve, async () => {
+        const n = await Uitvraag.publiceerEvents(Store, A.data, [A.event(e.id)]);
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
+        A.toast(`${e.naam} verstuurd – ${n} melding(en)`, 'ok');
+      });
+      const np = bg.querySelector('#eNuPlannen');
+      if (np) np.onclick = () => A.bezig(np, async () => {
+        const st = uitvraagStand(e);
+        if (st.geen && !await A.bevestig('Nu inplannen?', `${st.geen} oproepkracht(en) hebben nog niet gereageerd. Toch nu inplannen?`, 'Nu inplannen')) return;
+        await A.verwerkUitvragen([e.id]);
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
+        A.toast(e.naam + (A.data.instellingen.auto_publiceren ? ' is ingepland en verstuurd' : ' is ingepland – controleer en verstuur'), 'ok');
+      });
+    });
+    if (!res) return;
+    const oudeDiensten = A.data.diensten.filter(x => x.event_id === e.id);
+    if (res === 'weg') {
+      if (!await A.bevestig('Feest verwijderen', 'Het feest en ' + oudeDiensten.length + ' bijbehorende dienst(en) worden verwijderd.', 'Verwijderen')) return;
+      for (const x of oudeDiensten) { await Store.remove('diensten', x.id); await meldVoorEvent(ev, x.medewerker_id, `Je dienst op ${A.datumLang(x.datum)} (${ev.naam}) is vervallen.`); }
+      for (const r of A.data.event_reacties.filter(r => r.event_id === e.id)) await Store.remove('event_reacties', r.id);
+      await Store.remove('zalen_events', e.id);
+      await herlaad(); opnieuw(); A.toast('Feest verwijderd'); return;
+    }
+    // Nieuwe uitvraag starten?
+    const startUitvraag = res.uitvraag && (nieuw || !ev.uitvraag || !ev.status) && !['ingepland', 'concept'].includes(res.status);
+    if (startUitvraag) { res.status = 'open'; res.herinnerd = false; }
+    if (!res.uitvraag && res.status === 'open') res.status = null;
+    const { id, ...patch } = res;
+    if (nieuw) await Store.insert('zalen_events', res); else await Store.update('zalen_events', e.id, patch);
+    await herlaad();
+    if (startUitvraag) {
+      for (const x of oudeDiensten) await Store.remove('diensten', x.id);
+      const groep = G.uitvraagGroep(res, A.data);
+      for (const m of groep) await A.melding(m.id, `🎉 Nieuw feest: ${res.naam} op ${A.datumLang(res.datum)} (${res.start}–${res.eind}). Kun je werken? Laat het weten vóór ${A.datumLang(res.uitvraag_tot)}.`);
+      await herlaad(); opnieuw();
+      A.toast(`Opgeslagen – ${groep.length} oproepkracht(en) hebben een melding gekregen`, 'ok');
+      deelUitvraagWhatsApp(A.data.zalen_events.filter(x => x.status === 'open'));
+      return;
+    }
+    if (res.status === 'open') {
+      // uitvraag loopt nog: termijn of gegevens aangepast, verder niets plannen
+      if (ev.uitvraag_tot !== res.uitvraag_tot) for (const m of G.uitvraagGroep(res, A.data).filter(m => !A.data.event_reacties.some(r => r.event_id === e.id && r.medewerker_id === m.id)))
+        await A.melding(m.id, `De reactietermijn voor ${res.naam} (${A.datumLang(res.datum)}) is nu t/m ${A.datumLang(res.uitvraag_tot)}.`);
+      await herlaad(); opnieuw(); A.toast('Opgeslagen', 'ok'); return;
+    }
+    const moetHerplannen = nieuw || ev.datum !== res.datum || ev.start !== res.start || ev.eind !== res.eind || JSON.stringify(ev.bezetting) !== JSON.stringify(res.bezetting);
+    const maand = G.monthOf(res.datum);
+    if (moetHerplannen && (A.rooster(maand) || oudeDiensten.length || ['ingepland', 'concept'].includes(res.status))) {
+      const res2 = await herplanEvent(A.event(res.id), oudeDiensten);
+      A.toast(`Opgeslagen – ${res2.n} dienst(en) ingepland${res2.open ? ', ' + res2.open + ' open' : ''}`, res2.open ? '' : 'ok');
+    } else A.toast('Opgeslagen', 'ok');
+    opnieuw();
+  }
+
+  // Ziet het personeel de diensten van dit feest al?
+  const eventZichtbaar = ev => A.eventZichtbaar(ev);
+  async function meldVoorEvent(ev, mwId, tekst) { if (mwId && eventZichtbaar(ev)) await A.melding(mwId, tekst); }
+
+  // Plant de diensten voor één feest opnieuw; probeert dezelfde mensen te houden
+  async function herplanEvent(ev, oude) {
+    for (const x of oude) await Store.remove('diensten', x.id);
+    await herlaad();
+    const maand = G.monthOf(ev.datum);
+    if (!A.rooster(maand) && !['ingepland', 'concept'].includes(ev.status)) {
+      for (const x of oude) await meldVoorEvent(ev, x.medewerker_id, `Je dienst op ${A.datumLang(x.datum)} (${ev.naam}) is vervallen.`);
+      return { n: 0, open: 0 };
+    }
+    const slots = G.eventSlots(ev);
+    const ctx = G.context(A.data, A.data.diensten);
+    const nieuw = [];
+    const vrijeOude = oude.filter(x => x.medewerker_id);
+    for (const s of slots) {
+      const dienst = { id: Store.uuid(), maand, datum: s.datum, locatie: 'zalen', event_id: ev.id, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' };
+      const kand = G.kandidaten(ctx, dienst).filter(k => k.ok);
+      // eerst iemand die er al stond met dezelfde functie
+      const idx = vrijeOude.findIndex(o => o.functie === s.functie && kand.some(k => k.m.id === o.medewerker_id));
+      if (idx >= 0) { dienst.medewerker_id = vrijeOude[idx].medewerker_id; vrijeOude.splice(idx, 1); }
+      else if (kand.length) dienst.medewerker_id = kand[0].m.id;
+      if (dienst.medewerker_id) G.registreer(ctx, dienst);
+      nieuw.push(dienst);
+    }
+    await Store.insert('diensten', nieuw);
+    const pub = eventZichtbaar(ev);
+    if (pub) {
+      const oudSet = new Set(oude.map(x => x.medewerker_id + x.start + x.eind));
+      for (const x of nieuw.filter(x => x.medewerker_id && !oudSet.has(x.medewerker_id + x.start + x.eind)))
+        await A.melding(x.medewerker_id, `Je bent ingepland voor ${ev.naam} op ${A.datumLang(x.datum)} van ${x.start} tot ${x.eind} (${x.functie}).`);
+      for (const o of vrijeOude) await A.melding(o.medewerker_id, `Je dienst bij ${ev.naam} op ${A.datumLang(o.datum)} is vervallen.`);
+    }
+    await herlaad();
+    return { n: nieuw.length, open: nieuw.filter(x => !x.medewerker_id).length };
+  }
+
+  // =====================================================================
+  //  CAFETARIA
+  // =====================================================================
+  function pCafetaria() {
+    const d = A.data, nu = G.today();
+    const sl = d.sluitingsdagen.filter(s => s.datum >= G.addDays(nu, -1)).sort((a, b) => a.datum.localeCompare(b.datum));
+    hoofd.innerHTML = `<div class="kop"><h1>Cafetaria</h1></div>
+      <p class="zacht">Vaste diensten per weekdag. Dit is de basis voor elk nieuw rooster. Wijzigingen gelden voor roosters die je hierna maakt.</p>
+      <div class="rij" style="grid-template-columns:repeat(auto-fill,minmax(270px,1fr));align-items:start">
+      ${A.DAGEN.map((dag, wd) => { const ds = d.cafetaria_diensten.filter(c => +c.weekdag === wd).sort((a, b) => G.min(a.start) - G.min(b.start) || a.functie.localeCompare(b.functie));
+        const uren = ds.reduce((s, c) => s + G.hours(c.start, c.eind) * c.aantal, 0);
+        return `<div class="paneel" style="margin:0"><div class="paneel-kop"><h3 style="text-transform:capitalize">${dag}</h3><span class="zacht" style="font-size:.85rem">${ds.length ? A.uren(uren) + ' uur' : 'gesloten'}</span></div>
+          ${ds.map(c => `<div class="item klik" data-c="${c.id}" style="cursor:pointer;padding:.5em 0"><b style="font-variant-numeric:tabular-nums">${esc(c.start)}–${esc(c.eind)}</b><span>${esc(c.functie)}</span><span class="rechts"><span class="label caf">${c.aantal}×</span></span></div>`).join('') || '<div class="zacht" style="padding:.5em 0">Gesloten</div>'}
+          <div style="margin-top:.6em;display:flex;gap:.4em"><button class="knop klein" data-nieuw="${wd}">+ Dienst</button>${ds.length ? `<button class="knop klein plat" data-kopie="${wd}">Kopiëren naar…</button>` : ''}</div></div>`; }).join('')}
+      </div>
+      <div class="paneel" style="margin-top:1em"><div class="paneel-kop"><h3>Sluitingsdagen</h3><button class="knop klein" id="nieuwSluit">+ Dag toevoegen</button></div>
+        <p class="zacht">Op deze dagen worden er geen cafetaria-diensten ingepland (feestdagen, vakantie, verbouwing).</p>
+        ${sl.length ? sl.map(s => `<div class="item"><b>${esc(A.datumLang(s.datum))}</b><span class="zacht">${esc(s.reden || '')}</span><span class="rechts"><button class="icoon" data-sweg="${s.id}" title="Verwijderen">🗑</button></span></div>`).join('') : '<div class="leeg">Geen sluitingsdagen gepland</div>'}</div>`;
+    hoofd.querySelectorAll('[data-c]').forEach(x => x.onclick = () => cafModal(d.cafetaria_diensten.find(c => c.id === x.dataset.c)));
+    hoofd.querySelectorAll('[data-nieuw]').forEach(x => x.onclick = () => cafModal(null, +x.dataset.nieuw));
+    hoofd.querySelectorAll('[data-kopie]').forEach(x => x.onclick = () => kopieerDag(+x.dataset.kopie));
+    hoofd.querySelectorAll('[data-sweg]').forEach(x => x.onclick = async () => { await Store.remove('sluitingsdagen', x.dataset.sweg); await herlaad(); pCafetaria(); });
+    $('#nieuwSluit').onclick = async () => {
+      const res = await A.modal('Sluitingsdag toevoegen', `<div class="rij"><div class="veld"><label>Van</label><input type="date" id="sVan" value="${nu}"></div><div class="veld"><label>Tot en met</label><input type="date" id="sTot" value="${nu}"></div></div><div class="veld"><label>Reden</label><input id="sReden" placeholder="bv. Tweede Paasdag"></div>`,
+        [{ label: 'Annuleren', waarde: null }, { label: 'Toevoegen', soort: 'primair', waarde: bg => ({ van: bg.querySelector('#sVan').value, tot: bg.querySelector('#sTot').value || bg.querySelector('#sVan').value, reden: bg.querySelector('#sReden').value }) }]);
+      if (!res || !res.van) return;
+      const rows = []; for (let x = res.van; x <= res.tot && rows.length < 120; x = G.addDays(x, 1)) rows.push({ datum: x, reden: res.reden });
+      await Store.insert('sluitingsdagen', rows);
+      // bestaande cafetaria-diensten op die dagen?
+      const raak = A.data.diensten.filter(x => x.locatie === 'cafetaria' && x.datum >= res.van && x.datum <= res.tot);
+      if (raak.length && await A.bevestig('Diensten verwijderen?', `Er staan al ${raak.length} cafetaria-diensten in het rooster op deze dag(en). Wil je die verwijderen?`, 'Verwijderen')) {
+        for (const x of raak) { await Store.remove('diensten', x.id); await meldAlsGepubliceerd(x.maand, x.medewerker_id, `Je dienst op ${A.datumLang(x.datum)} vervalt: de cafetaria is gesloten${res.reden ? ' (' + res.reden + ')' : ''}.`); }
+      }
+      await herlaad(); pCafetaria();
+    };
+  }
+
+  async function cafModal(c, wd) {
+    const nieuw = !c;
+    c = c || { weekdag: wd, start: '16:00', eind: '21:00', functie: (A.data.instellingen.functies || [])[0], aantal: 1 };
+    const knoppen = [];
+    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
+    knoppen.push({ label: 'Annuleren', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => ({ weekdag: +bg.querySelector('#cDag').value, start: bg.querySelector('#cStart').value, eind: bg.querySelector('#cEind').value, functie: bg.querySelector('#cFn').value, aantal: +bg.querySelector('#cAantal').value || 1 }) });
+    const res = await A.modal(nieuw ? 'Vaste dienst toevoegen' : 'Vaste dienst', `
+      <div class="rij"><div class="veld"><label>Dag</label><select id="cDag">${A.DAGEN.map((d, i) => `<option value="${i}" ${i === +c.weekdag ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+        <div class="veld"><label>Functie</label><select id="cFn">${functieOpties(c.functie)}</select></div></div>
+      <div class="rij"><div class="veld"><label>Van</label><input type="time" id="cStart" value="${esc(c.start)}"></div><div class="veld"><label>Tot</label><input type="time" id="cEind" value="${esc(c.eind)}"></div>
+        <div class="veld"><label>Aantal mensen</label><input type="number" min="1" id="cAantal" value="${esc(c.aantal)}"></div></div>`, knoppen);
+    if (!res) return;
+    if (res === 'weg') await Store.remove('cafetaria_diensten', c.id);
+    else if (nieuw) await Store.insert('cafetaria_diensten', res);
+    else await Store.update('cafetaria_diensten', c.id, res);
+    await herlaad(); pCafetaria(); hintOpnieuw();
+  }
+
+  async function kopieerDag(wd) {
+    const res = await A.modal('Kopiëren naar andere dagen', `<p>De diensten van <b>${A.DAGEN[wd]}</b> kopiëren naar (bestaande diensten op die dagen worden vervangen):</p>
+      <div class="chips">${A.DAGEN.map((d, i) => i === wd ? '' : `<label class="chip-keuze"><input type="checkbox" value="${i}"><span>${d}</span></label>`).join('')}</div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Kopiëren', soort: 'primair', waarde: bg => [...bg.querySelectorAll('input:checked')].map(i => +i.value) }]);
+    if (!res || !res.length) return;
+    const bron = A.data.cafetaria_diensten.filter(c => +c.weekdag === wd);
+    for (const doel of res) {
+      for (const c of A.data.cafetaria_diensten.filter(c => +c.weekdag === doel)) await Store.remove('cafetaria_diensten', c.id);
+      await Store.insert('cafetaria_diensten', bron.map(c => ({ weekdag: doel, start: c.start, eind: c.eind, functie: c.functie, aantal: c.aantal })));
+    }
+    await herlaad(); pCafetaria(); hintOpnieuw();
+  }
+  function hintOpnieuw() {
+    const concept = A.data.roosters.find(r => r.status === 'concept');
+    A.toast(concept ? 'Opgeslagen. Maak het concept van ' + A.maandNaam(concept.maand) + ' opnieuw om dit mee te nemen.' : 'Opgeslagen', 'ok');
+  }
+
+  // =====================================================================
+  //  PERSONEEL
+  // =====================================================================
+  function pPersoneel() {
+    const alle = A.data.medewerkers.slice().sort((a, b) => (b.actief !== false) - (a.actief !== false) || a.naam.localeCompare(b.naam));
+    const maand = G.monthOf(G.today());
+    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
+      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th></tr></thead><tbody>
+      ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
+        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? ' <span class="label">uit dienst</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
+        <td>${(m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}</td>
+        <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
+        <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>
+        <td>${(m.vaste_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
+        <td>${(m.vrije_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
+        <td>${A.uren(urenVan(m.id, maand))} u</td></tr>`).join('')}
+      </tbody></table></div>${alle.length ? '' : '<div class="leeg"><span class="groot">👥</span>Nog geen personeel. Voeg je eerste medewerker toe.</div>'}</div>`;
+    $('#nieuwMw').onclick = () => mwModal(null);
+    hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => mwModal(A.mw(r.dataset.mw)));
+  }
+
+  async function mwModal(m) {
+    const nieuw = !m;
+    const kleuren = ['#e07a2f', '#2f7ae0', '#c0398a', '#2e9e6a', '#8a5cd6', '#d6a01e', '#1ea7b8', '#d64545', '#4b7f2a', '#7a6a58'];
+    m = m || { naam: '', pin: String(Math.floor(1000 + Math.random() * 9000)), telefoon: '', email: '', functies: [], locaties: ['cafetaria', 'zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 5, kleur: kleuren[A.data.medewerkers.length % kleuren.length], actief: true, notitie: '' };
+    const chips = (naam, opties, geselecteerd, rood) => `<div class="chips">${opties.map(([v, l]) => `<label class="chip-keuze ${rood ? 'rood' : ''}"><input type="checkbox" name="${naam}" value="${esc(v)}" ${(geselecteerd || []).map(String).includes(String(v)) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`;
+    const dagOpties = A.DAG_KORT.map((d, i) => [i, d]);
+    const html = `
+      <div class="rij"><div class="veld"><label>Naam</label><input id="mNaam" value="${esc(m.naam)}"></div><div class="veld"><label>Inlogcode (PIN)</label><input id="mPin" value="${esc(m.pin)}" inputmode="numeric" maxlength="6"></div></div>
+      <div class="rij"><div class="veld"><label>Telefoon</label><input id="mTel" value="${esc(m.telefoon || '')}"></div><div class="veld"><label>E-mail</label><input id="mMail" value="${esc(m.email || '')}"></div></div>
+      <div class="veld"><label>Functies</label>${chips('fn', (A.data.instellingen.functies || []).map(f => [f, f]), m.functies)}</div>
+      <div class="veld"><label>Werkt in</label>${chips('loc', [['cafetaria', 'Cafetaria'], ['zalen', 'Zalencentrum']], m.locaties)}</div>
+      <div class="rij"><div class="veld"><label>Contracturen per week <small>(0 = oproepkracht)</small></label><input type="number" min="0" step="0.5" id="mUren" value="${esc(m.contracturen)}"></div>
+        <div class="veld"><label>Max. dagen per week</label><input type="number" min="1" max="7" id="mMax" value="${esc(m.max_dagen_week || 5)}"></div></div>
+      <div class="veld"><label>Vaste werkdagen <small>(krijgt voorrang op deze dagen)</small></label>${chips('vast', dagOpties, m.vaste_dagen)}</div>
+      <div class="veld"><label>Kan nooit op <small>(wordt dan nooit ingepland)</small></label>${chips('vrij', dagOpties, m.vrije_dagen, true)}</div>
+      <div class="rij"><div class="veld"><label>Kleur in rooster</label><input type="color" id="mKleur" value="${esc(m.kleur)}" style="height:40px;padding:2px"></div>
+        <div class="veld"><label>&nbsp;</label><label class="check"><input type="checkbox" id="mActief" ${m.actief !== false ? 'checked' : ''}> In dienst</label></div></div>
+      <div class="veld"><label>Notitie <small>(alleen zichtbaar voor beheer)</small></label><textarea id="mNot">${esc(m.notitie || '')}</textarea></div>`;
+    const knoppen = [];
+    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
+    knoppen.push({ label: 'Annuleren', waarde: null }, {
+      label: 'Opslaan', soort: 'primair',
+      controle: bg => {
+        if (!bg.querySelector('#mNaam').value.trim()) return 'Vul een naam in';
+        const pin = bg.querySelector('#mPin').value.trim();
+        if (!/^\d{4,6}$/.test(pin)) return 'PIN moet 4 tot 6 cijfers zijn';
+        if (A.data.medewerkers.some(x => x.id !== m.id && x.pin === pin && x.naam.toLowerCase() === bg.querySelector('#mNaam').value.trim().toLowerCase())) return 'Deze naam met deze PIN bestaat al';
+        if (!bg.querySelectorAll('input[name=fn]:checked').length) return 'Kies minstens één functie';
+        return null;
+      },
+      waarde: bg => {
+        const val = n => [...bg.querySelectorAll(`input[name=${n}]:checked`)].map(i => i.value);
+        return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, notitie: bg.querySelector('#mNot').value };
+      }
+    });
+    const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen);
+    if (!res) return;
+    if (res === 'weg') {
+      const toekomst = A.data.diensten.filter(x => x.medewerker_id === m.id && x.datum >= G.today());
+      if (!await A.bevestig('Verwijderen', `${m.naam} wordt verwijderd.${toekomst.length ? ` ${toekomst.length} toekomstige dienst(en) worden open gezet.` : ''} Tip: zet iemand liever op "uit dienst", dan blijft de geschiedenis bewaard.`, 'Verwijderen')) return;
+      for (const x of toekomst) await Store.update('diensten', x.id, { medewerker_id: null });
+      await Store.remove('medewerkers', m.id);
+    } else if (nieuw) {
+      await Store.insert('medewerkers', res);
+      A.modal('Medewerker toegevoegd', `<p><b>${esc(res.naam)}</b> kan nu inloggen op de personeelspagina met PIN <b>${esc(res.pin)}</b>.</p><p class="zacht">Stuur de link en de code even door:</p>`,
+        [{ label: 'Sluiten', waarde: null }, { label: '💬 Via WhatsApp sturen', soort: 'ok', waarde: () => { window.open(`https://wa.me/${(res.telefoon || '').replace(/\D/g, '').replace(/^0/, '31')}?text=` + encodeURIComponent(`Hoi ${res.naam}! Vanaf nu staat het rooster online: ${siteUrl()}\nJe inlogcode is ${res.pin}`), '_blank'); } }]);
+    } else {
+      await Store.update('medewerkers', m.id, res);
+      if (m.actief !== false && res.actief === false) {
+        const toekomst = A.data.diensten.filter(x => x.medewerker_id === m.id && x.datum >= G.today());
+        if (toekomst.length && await A.bevestig('Toekomstige diensten', `${m.naam} staat nog ${toekomst.length}× ingepland. Die diensten open zetten?`, 'Open zetten'))
+          for (const x of toekomst) await Store.update('diensten', x.id, { medewerker_id: null });
+      }
+    }
+    await herlaad(); pPersoneel();
+  }
+
+  // =====================================================================
+  //  PRIKBORD
+  // =====================================================================
+  function pPrikbord() {
+    const b = A.data.berichten.slice().sort((a, b) => (b.geplaatst || '').localeCompare(a.geplaatst || ''));
+    hoofd.innerHTML = `<div class="kop"><h1>Prikbord</h1><button class="knop primair" id="nieuwBericht">+ Bericht</button></div>
+      <p class="zacht">Mededelingen die het personeel bovenaan hun pagina ziet.</p>
+      <div class="paneel">${b.length ? b.map(x => `<div class="bericht ${x.belangrijk ? 'belangrijk' : ''}"><div style="display:flex;gap:.5em;align-items:start"><div style="flex:1"><h4>${x.belangrijk ? '📣 ' : ''}${esc(x.titel)}</h4><p style="white-space:pre-wrap;margin:0 0 .2em">${esc(x.tekst)}</p><small class="zacht">${A.tijdGeleden(x.geplaatst)}</small></div><button class="icoon" data-bw="${x.id}">✏️</button></div></div>`).join('') : '<div class="leeg"><span class="groot">📌</span>Nog geen berichten</div>'}</div>`;
+    $('#nieuwBericht').onclick = () => berichtModal(null);
+    hoofd.querySelectorAll('[data-bw]').forEach(x => x.onclick = () => berichtModal(A.data.berichten.find(y => y.id === x.dataset.bw)));
+  }
+  async function berichtModal(b) {
+    const nieuw = !b; b = b || { titel: '', tekst: '', belangrijk: false };
+    const knoppen = nieuw ? [] : [{ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' }];
+    knoppen.push({ label: 'Annuleren', waarde: null }, { label: nieuw ? 'Plaatsen' : 'Opslaan', soort: 'primair', controle: bg => !bg.querySelector('#bTitel').value.trim() ? 'Vul een titel in' : null, waarde: bg => ({ titel: bg.querySelector('#bTitel').value.trim(), tekst: bg.querySelector('#bTekst').value, belangrijk: bg.querySelector('#bBel').checked }) });
+    const res = await A.modal(nieuw ? 'Nieuw bericht' : 'Bericht bewerken', `<div class="veld"><label>Titel</label><input id="bTitel" value="${esc(b.titel)}"></div><div class="veld"><label>Tekst</label><textarea id="bTekst" rows="5">${esc(b.tekst)}</textarea></div><label class="check"><input type="checkbox" id="bBel" ${b.belangrijk ? 'checked' : ''}> Belangrijk (valt extra op)</label>`, knoppen);
+    if (!res) return;
+    if (res === 'weg') await Store.remove('berichten', b.id);
+    else if (nieuw) { await Store.insert('berichten', { ...res, geplaatst: new Date().toISOString() }); for (const m of actieveMw()) await A.melding(m.id, '📌 Nieuw op het prikbord: ' + res.titel); }
+    else await Store.update('berichten', b.id, res);
+    await herlaad(); pPrikbord();
+  }
+
+  // =====================================================================
+  //  INSTELLINGEN
+  // =====================================================================
+  function pInstellingen() {
+    const s = A.data.instellingen;
+    hoofd.innerHTML = `<div class="kop"><h1>Instellingen</h1></div>
+      <div class="paneel"><h3>Algemeen</h3>
+        <div class="rij"><div class="veld"><label>Naam bedrijf</label><input id="iNaam" value="${esc(s.bedrijfsnaam)}"></div><div class="veld"><label>Beheercode</label><input id="iPin" value="${esc(s.admin_pin)}"></div></div>
+        <div class="rij"><div class="veld"><label>Wie belt personeel bij ziekte?</label><input id="iBNaam" value="${esc(s.beheer_naam || '')}" placeholder="bv. Ricardo"></div><div class="veld"><label>Telefoonnummer voor ziekmeldingen</label><input id="iBTel" value="${esc(s.beheer_telefoon || '')}" placeholder="06-…" inputmode="tel"></div></div>
+        <div class="veld"><label>Adres van de personeelspagina <small>(voor WhatsApp-berichten; leeg = automatisch)</small></label><input id="iUrl" value="${esc(s.site_url || '')}" placeholder="${esc(siteUrl())}"></div>
+      </div>
+      <div class="paneel"><h3>Functies</h3><p class="zacht">De taken die mensen kunnen doen.</p>
+        <div class="chips" id="iFuncties">${(s.functies || []).map(f => `<span class="label" style="font-size:.88rem;padding:.35em .5em .35em .8em">${esc(f)} <button class="icoon" data-fweg="${esc(f)}" style="font-size:.8rem;padding:0 .3em">✕</button></span>`).join('')}</div>
+        <div style="display:flex;gap:.5em;margin-top:.8em;max-width:360px"><input id="iNieuwFn" placeholder="Nieuwe functie, bv. Gastvrouw"><button class="knop" id="iFnToev">Toevoegen</button></div></div>
+      <div class="paneel"><h3>Automatisch rooster</h3>
+        <div class="rij"><div class="veld"><label>Nieuw rooster maken … dagen voor het einde van de maand</label><input type="number" min="1" max="28" id="iDagen" value="${esc(s.dagen_voor_einde)}"></div>
+          <div class="veld"><label>Personeel kan tot dag … van de maand doorgeven wanneer ze volgende maand niet kunnen</label><input type="number" min="1" max="31" id="iSlot" value="${esc(s.beschikbaarheid_slot || 25)}"></div></div>
+        <div class="veld" style="max-width:420px"><label>Oproepkrachten krijgen … dagen om te reageren op nieuwe feesten</label><input type="number" min="1" max="30" id="iUitvraag" value="${esc(s.uitvraag_dagen || 7)}"></div>
+        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
+        <label class="check"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
+        <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+      <div class="paneel"><h3>📲 Meldingen op je telefoon</h3>
+        <p class="zacht">Krijg een pushbericht als er een rooster of feest klaarstaat om te controleren, iemand vrij vraagt of een ruil goedgekeurd moet worden. Gratis via de app <b>ntfy</b> (Android en iPhone).</p>
+        <ol class="zacht" style="font-size:.9rem;padding-left:1.2em;margin-top:0"><li>Installeer de app <b>ntfy</b> uit de Play Store of App Store.</li><li>Tik op <b>+</b> en abonneer je op het onderwerp hieronder (verzin iets unieks, zoals een wachtwoord).</li><li>Vul hetzelfde onderwerp hier in, sla op en klik op <i>Testbericht</i>.</li></ol>
+        <div style="display:flex;gap:.5em;max-width:480px"><input id="iNtfy" value="${esc(s.ntfy_topic || '')}" placeholder="bv. debeurs-rooster-7k2q9"><button class="knop" id="iNtfyGen" type="button" title="Willekeurig onderwerp maken">🎲</button><button class="knop" id="iNtfyTest" type="button">Testbericht</button></div>
+        ${s.site_url ? '' : '<p class="zacht" style="font-size:.85rem;margin:.6em 0 0">Tip: vul hierboven ook het adres van de personeelspagina in, dan opent een tik op het bericht meteen het beheer.</p>'}</div>
+      <div style="display:flex;gap:.5em;flex-wrap:wrap"><button class="knop primair" id="iOpslaan">Opslaan</button><button class="knop" id="iBackup">⬇ Back-up downloaden</button></div>`;
+    hoofd.querySelectorAll('[data-fweg]').forEach(b => b.onclick = async () => {
+      const f = b.dataset.fweg;
+      const gebruikt = A.data.medewerkers.filter(m => (m.functies || []).includes(f)).length + A.data.cafetaria_diensten.filter(c => c.functie === f).length;
+      if (gebruikt && !await A.bevestig('Functie verwijderen', `"${f}" wordt nog gebruikt bij ${gebruikt} medewerker(s)/diensten. Toch verwijderen?`, 'Verwijderen')) return;
+      await Store.update('instellingen', 1, { functies: s.functies.filter(x => x !== f) }); await herlaad(); pInstellingen();
+    });
+    $('#iFnToev').onclick = async () => {
+      const f = $('#iNieuwFn').value.trim(); if (!f || s.functies.includes(f)) return;
+      await Store.update('instellingen', 1, { functies: [...s.functies, f] }); await herlaad(); pInstellingen();
+    };
+    $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
+      if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
+      await Store.update('instellingen', 1, { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, uitvraag_dagen: +$('#iUitvraag').value || 7, ntfy_topic: $('#iNtfy').value.trim(), beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() });
+      await herlaad(); $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam; A.toast('Instellingen opgeslagen', 'ok'); pInstellingen();
+    });
+    $('#iNtfyGen').onclick = () => { $('#iNtfy').value = (A.data.instellingen.bedrijfsnaam || 'rooster').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(-20) + '-' + Math.random().toString(36).slice(2, 8); };
+    $('#iNtfyTest').onclick = e => A.bezig(e.target, async () => {
+      const t = $('#iNtfy').value.trim(); if (!t) return A.toast('Vul eerst een onderwerp in', 'fout');
+      const ok = await Uitvraag.push({ ...A.data.instellingen, ntfy_topic: t }, 'Test roosterapp', 'Het werkt! Je krijgt hier voortaan meldingen van het rooster.');
+      A.toast(ok ? 'Testbericht verstuurd – kijk op je telefoon' : 'Versturen mislukt', ok ? 'ok' : 'fout');
+    });
+    $('#iBackup').onclick = () => A.download('rooster-backup-' + G.today() + '.json', JSON.stringify(A.data, null, 2), 'application/json');
+  }
+
+  const PAGINAS = { overzicht: pOverzicht, rooster: pRooster, aanvragen: pAanvragen, zalen: pZalen, cafetaria: pCafetaria, personeel: pPersoneel, prikbord: pPrikbord, instellingen: pInstellingen, verzuim: pVerzuim };
+  start();
+})();
