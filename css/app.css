@@ -336,3 +336,5 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .push-opnieuw { background: var(--zaal-licht); border-radius: 10px; padding: .8em 1em; display: grid; gap: .45em; justify-items: start; }
 .push-opnieuw .check { margin: 0; font-weight: 600; color: var(--inkt); }
 .push-opnieuw .check { display: flex; align-items: center; gap: .5em; } .push-opnieuw input[type=radio] { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+
+.b-ontvangers { background: var(--accent-licht); border-radius: 8px; padding: .55em .8em; font-size: .88rem; margin-bottom: .9em; }
