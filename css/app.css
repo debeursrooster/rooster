@@ -284,3 +284,11 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .push-stappen li { margin: .3em 0; }
 .push-ic { display: inline-block; border: 1.5px solid currentColor; border-radius: 4px; padding: 0 .3em; font-size: .8rem; line-height: 1.4; color: #1a73e8; }
 .push-weg { position: absolute; top: .4em; right: .4em; }
+
+/* ---------- logo ---------- */
+.login-logo { display: block; width: min(300px, 90%); height: auto; margin: 0 auto 1.2em; }
+.merk { flex-direction: column; align-items: flex-start; gap: .3em; }
+.merk-logo { width: 100%; max-width: 210px; height: auto; display: block; }
+.merk small { padding-left: .2em; }
+.kop-logo { display: block; height: 42px; width: auto; margin-bottom: .45em; }
+.mobiel-logo { width: 28px; height: 28px; border-radius: 7px; margin-right: .5em; vertical-align: middle; }
