@@ -673,7 +673,9 @@
   // ---------- meerdere feesten in één keer, één bericht per oproepkracht ----------
   async function meerdereFeesten() {
     const nu = G.today(), dagenUit = +A.data.instellingen.uitvraag_dagen || 7;
-    const bezTekst = g => standaardBezetting(g).map(b => b.aantal + '× ' + b.functie).join(', ');
+    const bezTekst = bez => bez.filter(b => b.aantal > 0).map(b => b.aantal + '× ' + b.functie).join(', ') || 'nog niemand – klik op Aanpassen';
+    const fns = A.data.instellingen.functies || [];
+    const bezVelden = bez => fns.map(f => { const b = bez.find(x => x.functie === f); return `<label class="mf-fn"><span>${esc(f)}</span><input type="number" min="0" max="50" data-fn="${esc(f)}" value="${b ? b.aantal : 0}"></label>`; }).join('');
     const rij = (r) => `<div class="mf-rij" style="border:1px solid var(--lijn);border-radius:10px;padding:.6em .7em .4em;margin-bottom:.5em;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:.4em .5em;align-items:end">
         <div><label>Datum</label><input type="date" class="mDatum" value="${esc(r.datum)}" min="${nu}"></div>
         <div style="grid-column:span 2"><label>Naam</label><input class="mNaam" value="${esc(r.naam || '')}" placeholder="bv. Bruiloft Jansen"></div>
@@ -681,29 +683,41 @@
         <div><label>Van</label><input type="time" class="mStart" value="${esc(r.start)}"></div>
         <div><label>Tot</label><input type="time" class="mEind" value="${esc(r.eind)}"></div>
         <div><label>Gasten</label><input type="number" class="mGasten" value="${esc(r.gasten)}" min="0"></div><span></span>
-        <small class="zacht mBez" style="grid-column:1/-1">👥 ${esc(bezTekst(r.gasten))}</small></div>`;
+        <div class="mf-bez" style="grid-column:1/-1"><small class="zacht mBez">👥 ${esc(bezTekst(r.bezetting || standaardBezetting(r.gasten)))}</small>
+          <button class="knop klein plat mBezKnop" type="button">✏️ Aanpassen</button>
+          <div class="mf-fns verborgen">${bezVelden(r.bezetting || standaardBezetting(r.gasten))}</div></div></div>`;
     const zat = (() => { let d = G.addDays(nu, 14); while (G.weekday(d) !== 5) d = G.addDays(d, 1); return d; })();
     const html = `<p class="zacht" style="margin-top:-.3em">Zet alle nieuwe feesten in één keer in. De oproepkrachten krijgen <b>één bericht</b> met alle datums waarop ze kunnen werken.</p>
       <div id="mRijen">${rij({ datum: zat, start: '19:00', eind: '00:30', gasten: 80 })}</div>
       <button class="knop klein" id="mRij" type="button">+ Nog een feest</button>
-      <p class="zacht" style="font-size:.82rem">De bezetting wordt voorgesteld op basis van het aantal gasten. Daarna kun je per feest nog aanpassen.</p>
+      <p class="zacht" style="font-size:.82rem">De bezetting wordt voorgesteld op basis van het aantal gasten (in te stellen bij Instellingen). Met <b>✏️ Aanpassen</b> zet je per feest zelf hoeveel mensen er per functie nodig zijn.</p>
       <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em;margin-top:.6em">
         <label class="check"><input type="checkbox" id="mUit" checked> Oproepkrachten laten reageren (uitvraag)</label>
         <div id="mUitWrap" style="margin-top:.5em"><label>Reageren kan tot en met</label><input type="date" id="mUitTot" value="${esc(G.addDays(nu, dagenUit))}" style="max-width:200px">
         <small class="zacht" style="display:block;margin-top:.3em">Ligt een feest eerder, dan stopt de termijn voor dat feest vanzelf 2 dagen ervoor.</small></div></div>`;
-    const lees = bg => [...bg.querySelectorAll('.mf-rij')].map(r => ({ datum: r.querySelector('.mDatum').value, naam: r.querySelector('.mNaam').value.trim(), start: r.querySelector('.mStart').value, eind: r.querySelector('.mEind').value, gasten: +r.querySelector('.mGasten').value || 0 }));
+    const leesBezRij = r => [...r.querySelectorAll('.mf-fns input')].map(i => ({ functie: i.dataset.fn, aantal: +i.value || 0 })).filter(b => b.aantal > 0);
+    const lees = bg => [...bg.querySelectorAll('.mf-rij')].map(r => ({ datum: r.querySelector('.mDatum').value, naam: r.querySelector('.mNaam').value.trim(), start: r.querySelector('.mStart').value, eind: r.querySelector('.mEind').value, gasten: +r.querySelector('.mGasten').value || 0, bezetting: leesBezRij(r) }));
     const res = await A.modal('Meerdere feesten toevoegen', html, [{ label: 'Annuleren', waarde: null }, {
       label: 'Opslaan', soort: 'primair',
-      controle: bg => { const rs = lees(bg); if (!rs.length) return 'Voeg minstens één feest toe'; if (rs.some(r => !r.datum || !r.naam)) return 'Vul bij elk feest een datum en naam in'; if (rs.some(r => r.datum < nu)) return 'Er staat een datum in het verleden'; return null; },
+      controle: bg => { const rs = lees(bg); if (!rs.length) return 'Voeg minstens één feest toe'; if (rs.some(r => !r.datum || !r.naam)) return 'Vul bij elk feest een datum en naam in'; if (rs.some(r => r.datum < nu)) return 'Er staat een datum in het verleden'; if (rs.some(r => !r.bezetting.length)) return 'Geef bij elk feest aan hoeveel mensen er nodig zijn (✏️ Aanpassen)'; return null; },
       waarde: bg => ({ rijen: lees(bg), uitvraag: bg.querySelector('#mUit').checked, tot: bg.querySelector('#mUitTot').value })
     }], bg => {
       const koppel = () => bg.querySelectorAll('.mf-rij').forEach(r => {
         r.querySelector('.mWeg').onclick = () => r.remove();
-        r.querySelector('.mGasten').oninput = () => { r.querySelector('.mBez').textContent = '👥 ' + bezTekst(r.querySelector('.mGasten').value); };
+        const toon = () => { r.querySelector('.mBez').textContent = '👥 ' + bezTekst(leesBezRij(r)); };
+        r.querySelector('.mGasten').oninput = () => {
+          if (r.dataset.handmatig) return;   // zelf aangepast: niet meer automatisch overschrijven
+          const voorstel = standaardBezetting(r.querySelector('.mGasten').value);
+          r.querySelectorAll('.mf-fns input').forEach(i => { const b = voorstel.find(x => x.functie === i.dataset.fn); i.value = b ? b.aantal : 0; });
+          toon();
+        };
+        r.querySelectorAll('.mf-fns input').forEach(i => i.oninput = () => { r.dataset.handmatig = '1'; toon(); });
+        r.querySelector('.mBezKnop').onclick = () => { const f = r.querySelector('.mf-fns'); f.classList.toggle('verborgen'); r.querySelector('.mBezKnop').textContent = f.classList.contains('verborgen') ? '✏️ Aanpassen' : '✓ Klaar'; };
       });
       koppel();
       bg.querySelector('#mRij').onclick = () => {
         const rs = lees(bg), laatst = rs[rs.length - 1] || { datum: zat, start: '19:00', eind: '00:30', gasten: 80 };
+        if (laatst.bezetting && !laatst.bezetting.length) delete laatst.bezetting;
         bg.querySelector('#mRijen').insertAdjacentHTML('beforeend', rij({ ...laatst, naam: '', datum: laatst.datum ? G.addDays(laatst.datum, 7) : zat }));
         koppel(); const n = bg.querySelectorAll('.mNaam'); n[n.length - 1].focus();
       };
@@ -713,7 +727,7 @@
     const events = res.rijen.map(r => {
       let tot = null;
       if (res.uitvraag) { tot = res.tot || G.addDays(nu, dagenUit); const max = G.addDays(r.datum, -2); if (tot > max) tot = max < nu ? nu : max; }
-      return { id: Store.uuid(), datum: r.datum, naam: r.naam, zaal: '', start: r.start || '19:00', eind: r.eind || '00:30', gasten: r.gasten, bezetting: standaardBezetting(r.gasten), notitie: '',
+      return { id: Store.uuid(), datum: r.datum, naam: r.naam, zaal: '', start: r.start || '19:00', eind: r.eind || '00:30', gasten: r.gasten, bezetting: r.bezetting.length ? r.bezetting : standaardBezetting(r.gasten), notitie: '',
         uitvraag: res.uitvraag, uitvraag_tot: tot, status: res.uitvraag ? 'open' : null, herinnerd: false };
     }).sort((a, b) => a.datum.localeCompare(b.datum));
     await Store.insert('zalen_events', events);
@@ -794,11 +808,20 @@
     hoofd.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
   }
 
-  function standaardBezetting(gasten, start, eind) {
-    const g = +gasten || 0;
-    const b = [{ functie: 'Bediening', aantal: Math.max(1, Math.ceil(g / 40)) }, { functie: 'Bar', aantal: Math.max(1, Math.ceil(g / 80)) }];
-    if (g >= 50) b.push({ functie: 'Afwas', aantal: 1 });
-    return b.filter(x => (A.data.instellingen.functies || []).includes(x.functie));
+  // Standaardbezetting op basis van gasten. De regels stel je in bij Instellingen → Standaard bezetting feesten.
+  // Regel: { functie, per: 1 persoon per X gasten (0 = vast aantal), min, max (0 = geen maximum) }
+  const OUDE_REGELS = [{ functie: 'Bediening', per: 40, min: 1, max: 0 }, { functie: 'Bar', per: 80, min: 1, max: 0 }, { functie: 'Afwas', per: 0, min: 1, max: 0, vanaf: 50 }];
+  const bezettingRegels = () => (Array.isArray(A.data.instellingen.bezetting_regels) && A.data.instellingen.bezetting_regels.length) ? A.data.instellingen.bezetting_regels : OUDE_REGELS;
+  function aantalVolgensRegel(r, g) {
+    if (r.vanaf && g < r.vanaf) return 0;
+    let n = +r.per > 0 ? Math.ceil(g / +r.per) : 0;
+    n = Math.max(n, +r.min || 0);
+    if (+r.max > 0) n = Math.min(n, +r.max);
+    return n;
+  }
+  function standaardBezetting(gasten) {
+    const g = +gasten || 0, fns = A.data.instellingen.functies || [];
+    return bezettingRegels().filter(r => fns.includes(r.functie)).map(r => ({ functie: r.functie, aantal: aantalVolgensRegel(r, g) })).filter(b => b.aantal > 0);
   }
 
   async function eventModal(ev) {
@@ -1140,6 +1163,13 @@
   // =====================================================================
   //  INSTELLINGEN
   // =====================================================================
+  const regelRij = r => `<div class="regel-rij"><select class="rFn">${functieOpties(r.functie)}</select>
+      <input type="number" class="rPer" min="0" value="${esc(+r.per || 0)}" title="1 persoon per zoveel gasten (0 = vast aantal)">
+      <input type="number" class="rMin" min="0" value="${esc(+r.min || 0)}" title="minimaal">
+      <input type="number" class="rMax" min="0" value="${esc(+r.max || 0)}" title="maximaal (0 = geen maximum)">
+      <button class="icoon rWeg" type="button" title="Verwijderen">✕</button></div>`;
+  const leesRegels = () => [...hoofd.querySelectorAll('.regel-rij')].map(r => ({ functie: r.querySelector('.rFn').value, per: +r.querySelector('.rPer').value || 0, min: +r.querySelector('.rMin').value || 0, max: +r.querySelector('.rMax').value || 0 })).filter(r => r.functie && (r.per || r.min));
+
   function pInstellingen() {
     const s = A.data.instellingen;
     hoofd.innerHTML = `<div class="kop"><h1>Instellingen</h1></div>
@@ -1158,6 +1188,13 @@
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
         <label class="check"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
         <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+      <div class="paneel"><h3>🎉 Standaard bezetting feesten</h3>
+        <p class="zacht" style="font-size:.9rem">Hiermee wordt bij een nieuw feest voorgesteld hoeveel mensen er nodig zijn. Per feest kun je het daarna altijd nog aanpassen.
+          Laat "1 per … gasten" op <b>0</b> staan voor een vast aantal.</p>
+        <div class="regel-kop"><span>Functie</span><span>1 per … gasten</span><span>Minimaal</span><span>Maximaal</span><span></span></div>
+        <div id="iRegels">${bezettingRegels().map(regelRij).join('')}</div>
+        <button class="knop klein" id="iRegelToev" type="button">+ Functie</button>
+        <p class="zacht" style="font-size:.88rem;margin:.8em 0 0" id="iRegelVb"></p></div>
       <div class="paneel" style="padding:0;border:0;background:none;box-shadow:none"><h3 style="margin:.2em 0 .6em">📲 App en meldingen op je telefoon</h3><div id="iPush"></div>
         <p class="zacht" style="font-size:.85rem;margin:.4em 0 0">Zet dit aan op elk apparaat waarop je meldingen wilt krijgen. Het personeel zet het zelf aan op hun eigen telefoon (knop op de personeelspagina en onder het belletje).</p></div>
       <div style="display:flex;gap:.5em;flex-wrap:wrap"><button class="knop primair" id="iOpslaan">Opslaan</button><button class="knop" id="iBackup">⬇ Back-up downloaden</button></div>`;
@@ -1173,10 +1210,28 @@
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      await Store.update('instellingen', 1, { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() });
+      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() };
+      try { await Store.update('instellingen', 1, wijz); }
+      catch (x) {
+        if (!/bezetting_regels/.test(x.message)) throw x;
+        delete wijz.bezetting_regels; await Store.update('instellingen', 1, wijz);
+        A.toast('Opgeslagen, behalve de standaard bezetting: voer eerst bezetting.sql uit in Supabase', 'fout');
+      }
       await herlaad(); $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam; A.toast('Instellingen opgeslagen', 'ok'); pInstellingen();
     });
     Push.paneel($('#iPush'), { rol: 'beheer', onTest: testBeheer });
+    // standaard bezetting
+    const vbRegels = () => {
+      const r = leesRegels(), fnsAan = A.data.instellingen.functies || [];
+      const vb = g => r.filter(x => fnsAan.includes(x.functie)).map(x => ({ f: x.functie, n: aantalVolgensRegel(x, g) })).filter(x => x.n).map(x => x.n + '× ' + x.f).join(', ') || 'niemand';
+      $('#iRegelVb').innerHTML = `<b>Voorbeeld:</b> 80 gasten → ${esc(vb(80))}<br><b>Voorbeeld:</b> 150 gasten → ${esc(vb(150))}<br><b>Voorbeeld:</b> 250 gasten → ${esc(vb(250))}`;
+    };
+    const koppelRegels = () => {
+      hoofd.querySelectorAll('.regel-rij .rWeg').forEach(b => b.onclick = () => { b.closest('.regel-rij').remove(); vbRegels(); });
+      hoofd.querySelectorAll('.regel-rij input, .regel-rij select').forEach(i => i.oninput = vbRegels);
+    };
+    $('#iRegelToev').onclick = () => { $('#iRegels').insertAdjacentHTML('beforeend', regelRij({ functie: (A.data.instellingen.functies || [])[0], per: 0, min: 1, max: 0 })); koppelRegels(); vbRegels(); };
+    koppelRegels(); vbRegels();
     $('#iBackup').onclick = () => A.download('rooster-backup-' + G.today() + '.json', JSON.stringify(A.data, null, 2), 'application/json');
   }
 
