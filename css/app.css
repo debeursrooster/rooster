@@ -272,3 +272,15 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
   .dagen { grid-template-columns: repeat(7, 1fr); overflow: visible; }
   .dienst { background: #fff !important; }
 }
+
+/* ---------- app installeren & pushmeldingen ---------- */
+.push-paneel { position: relative; display: grid; gap: .8em; border: 2px solid var(--accent-licht); }
+.push-blok p { margin: .3em 0 .7em; font-size: .9rem; }
+.push-blok.aan { display: flex; flex-wrap: wrap; align-items: center; gap: .4em .6em; }
+.push-blok.aan .push-knoppen { margin-left: auto; display: flex; gap: .4em; }
+.push-blok.let b { color: var(--let); }
+.push-blok + .push-blok { border-top: 1px solid var(--lijn); padding-top: .8em; }
+.push-stappen { margin: .5em 0 .4em; padding-left: 1.3em; font-size: .92rem; }
+.push-stappen li { margin: .3em 0; }
+.push-ic { display: inline-block; border: 1.5px solid currentColor; border-radius: 4px; padding: 0 .3em; font-size: .8rem; line-height: 1.4; color: #1a73e8; }
+.push-weg { position: absolute; top: .4em; right: .4em; }
