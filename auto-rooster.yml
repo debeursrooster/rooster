@@ -1,0 +1,20 @@
+name: Automatisch rooster maken
+
+on:
+  schedule:
+    - cron: '17 5 * * *'   # elke dag rond 06:17 / 07:17 Nederlandse tijd
+  workflow_dispatch:        # handmatig starten kan ook (tabblad Actions)
+
+jobs:
+  rooster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Rooster maken als het tijd is
+        run: node scripts/auto-rooster.cjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
