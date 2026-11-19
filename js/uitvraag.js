@@ -24,7 +24,7 @@
       (perMw[d.medewerker_id] = perMw[d.medewerker_id] || []).push(d);
     }
     return Object.entries(perMw).filter(([mid]) => (data.medewerkers || []).some(m => m.id === mid && m.actief !== false)).map(([mid, ds]) => ({
-      medewerker_id: mid, gelezen: false, tijd: tijd || new Date().toISOString(),
+      medewerker_id: mid, gelezen: false, tijd: tijd || new Date().toISOString(), titel: 'Rooster ' + maandNaam(maand) + ' staat online',
       tekst: `📅 Het rooster voor ${maandNaam(maand)} staat online. Je bent ${ds.length}× ingeroosterd (${uren(ds.reduce((t, d) => t + G.hours(d.start, d.eind), 0))} uur). Eerste dienst: ${datumTekst(ds.sort((a, b) => a.datum.localeCompare(b.datum))[0].datum)}.`
     }));
   };
@@ -43,7 +43,7 @@
     for (const d of ds.filter(d => d.medewerker_id)) (perMw[d.medewerker_id] = perMw[d.medewerker_id] || []).push(d);
     const evNaam = id => (events.find(e => e.id === id) || {}).naam || 'feest';
     for (const [mid, lijst] of Object.entries(perMw))
-      rows.push({ medewerker_id: mid, gelezen: false, tijd: nu, tekst: '🎉 Je bent ingeroosterd: ' + lijst.sort((a, b) => a.datum.localeCompare(b.datum)).map(d => `${datumTekst(d.datum)} ${d.start}–${d.eind} (${evNaam(d.event_id)}, ${d.functie})`).join('; ') + '.' });
+      rows.push({ medewerker_id: mid, gelezen: false, tijd: nu, titel: 'Ingeroosterd in het zalencentrum', tekst: '🎉 Je bent ingeroosterd: ' + lijst.sort((a, b) => a.datum.localeCompare(b.datum)).map(d => `${datumTekst(d.datum)} ${d.start}–${d.eind} (${evNaam(d.event_id)}, ${d.functie})`).join('; ') + '.' });
     for (const e of events) {
       const ingedeeld = new Set(ds.filter(d => d.event_id === e.id && d.medewerker_id).map(d => d.medewerker_id));
       for (const r of (data.event_reacties || []).filter(r => r.event_id === e.id && r.kan && !ingedeeld.has(r.medewerker_id)))

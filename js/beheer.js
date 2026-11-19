@@ -122,7 +122,7 @@
       <div id="oPush"></div>
       ${teControleren.length ? `<div class="statusbalk concept" style="margin-bottom:1.2em">🔔 <div><b>Klaar om te controleren en te versturen:</b> het personeel ziet dit pas na versturen.</div><div class="acties">${teControleren.join('')}</div></div>` : ''}
       <div class="kop"><div><h1>Goedendag 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
-        <div class="acties"><a class="knop" href="#zalen">+ Feest toevoegen</a><a class="knop primair" href="#rooster">Rooster bekijken</a></div></div>
+        <div class="acties"><button class="knop" id="oBericht" type="button">🔔 Bericht aan personeel</button><a class="knop" href="#zalen">+ Feest toevoegen</a><a class="knop primair" href="#rooster">Rooster bekijken</a></div></div>
       <div class="tegels">
         <div class="tegel klik ${verlofOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/verlof"><div class="getal">${verlofOpen.length}</div><div class="wat">vrij-aanvragen</div></div>
         <div class="tegel klik ${ruilOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/ruil"><div class="getal">${ruilOpen.length}</div><div class="wat">ruilingen goed te keuren</div></div>
@@ -153,6 +153,7 @@
       await herlaad(); pOverzicht();
     });
     if (!Push.later('beheer')) Push.paneel($('#oPush'), { rol: 'beheer', compact: true, onTest: testBeheer });
+    $('#oBericht').onclick = () => berichtAanPersoneel();
   }
 
   // =====================================================================
@@ -1123,7 +1124,7 @@
   function pPersoneel() {
     const alle = A.data.medewerkers.slice().sort((a, b) => (b.actief !== false) - (a.actief !== false) || a.naam.localeCompare(b.naam));
     const maand = G.monthOf(G.today());
-    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
+    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
         <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? ' <span class="label">uit dienst</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
@@ -1135,6 +1136,7 @@
         <td>${A.uren(urenVan(m.id, maand))} u</td></tr>`).join('')}
       </tbody></table></div>${alle.length ? '' : '<div class="leeg"><span class="groot">👥</span>Nog geen personeel. Voeg je eerste medewerker toe.</div>'}</div>`;
     $('#nieuwMw').onclick = () => mwModal(null);
+    $('#mwBericht').onclick = () => berichtAanPersoneel();
     hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => mwModal(A.mw(r.dataset.mw)));
   }
 
@@ -1198,12 +1200,78 @@
   // =====================================================================
   //  PRIKBORD
   // =====================================================================
+  // =====================================================================
+  //  BERICHT AAN PERSONEEL (pushmelding naar een gekozen groep)
+  // =====================================================================
+  async function berichtAanPersoneel() {
+    const mws = actieveMw(), fns = A.data.instellingen.functies || [], nu = G.today();
+    const chip = (naam, v, l, aan) => `<label class="chip-keuze"><input type="checkbox" name="${naam}" value="${esc(v)}" ${aan ? 'checked' : ''}><span>${esc(l)}</span></label>`;
+    const html = `
+      <div class="veld"><label>Naar wie?</label>
+        <select id="bWie">
+          <option value="alle">Iedereen in dienst</option>
+          <option value="oproep">Alleen oproepkrachten</option>
+          <option value="vast">Alleen vast personeel (met contracturen)</option>
+          <option value="functie">Per functie…</option>
+          <option value="locatie">Per locatie…</option>
+          <option value="dag">Wie werkt op een bepaalde dag…</option>
+          <option value="zelf">Zelf kiezen…</option>
+        </select></div>
+      <div class="veld b-extra" data-voor="functie"><div class="chips">${fns.map(f => chip('bFn', f, f)).join('')}</div></div>
+      <div class="veld b-extra" data-voor="locatie"><div class="chips">${chip('bLoc', 'cafetaria', 'Cafetaria')}${chip('bLoc', 'zalen', 'Zalencentrum')}</div></div>
+      <div class="veld b-extra" data-voor="dag"><input type="date" id="bDag" value="${nu}" style="max-width:200px"></div>
+      <div class="veld b-extra" data-voor="zelf"><div class="chips">${mws.map(m => chip('bMw', m.id, m.naam)).join('')}</div></div>
+      <div class="b-ontvangers" id="bOntv"></div>
+      <div class="veld"><label>Titel <small>(vet bovenaan de melding)</small></label><input id="bTitel" maxlength="60" placeholder="${esc(A.data.instellingen.bedrijfsnaam || 'Rooster')}"></div>
+      <div class="veld"><label>Bericht</label><textarea id="bTekst" rows="4" maxlength="500" placeholder="bv. Zaterdag beginnen we een half uur eerder i.v.m. de bruiloft."></textarea><small class="zacht" id="bTeller">0 / 500</small></div>
+      <label class="check"><input type="checkbox" id="bPrik"> Ook op het prikbord zetten</label>`;
+    const ontvangers = bg => {
+      const wie = bg.querySelector('#bWie').value;
+      const aan = n => [...bg.querySelectorAll(`input[name=${n}]:checked`)].map(i => i.value);
+      if (wie === 'alle') return mws;
+      if (wie === 'oproep') return mws.filter(G.isOproep);
+      if (wie === 'vast') return mws.filter(m => !G.isOproep(m));
+      if (wie === 'functie') { const f = aan('bFn'); return mws.filter(m => (m.functies || []).some(x => f.includes(x))); }
+      if (wie === 'locatie') { const l = aan('bLoc'); return mws.filter(m => (m.locaties || []).some(x => l.includes(x))); }
+      if (wie === 'dag') { const d = bg.querySelector('#bDag').value; const ids = new Set(A.data.diensten.filter(x => x.datum === d && x.medewerker_id && A.dienstZichtbaar(x)).map(x => x.medewerker_id)); return mws.filter(m => ids.has(m.id)); }
+      const ids = aan('bMw'); return mws.filter(m => ids.includes(m.id));
+    };
+    const res = await A.modal('🔔 Bericht aan personeel', html, [{ label: 'Annuleren', waarde: null }, {
+      label: 'Versturen', soort: 'primair',
+      controle: bg => !bg.querySelector('#bTekst').value.trim() ? 'Schrijf eerst een bericht' : !ontvangers(bg).length ? 'Er is niemand gekozen' : null,
+      waarde: bg => ({ naar: ontvangers(bg), titel: bg.querySelector('#bTitel').value.trim(), tekst: bg.querySelector('#bTekst').value.trim(), prik: bg.querySelector('#bPrik').checked })
+    }], bg => {
+      const ververs = () => {
+        const wie = bg.querySelector('#bWie').value;
+        bg.querySelectorAll('.b-extra').forEach(x => x.style.display = x.dataset.voor === wie ? '' : 'none');
+        const lijst = ontvangers(bg);
+        bg.querySelector('#bOntv').innerHTML = lijst.length
+          ? `<b>Gaat naar ${lijst.length} ${lijst.length === 1 ? 'persoon' : 'mensen'}:</b> <span class="zacht">${lijst.map(m => esc(m.naam)).join(', ')}</span>`
+          : '<span style="color:var(--fout)">Nog niemand gekozen</span>';
+      };
+      bg.querySelectorAll('#bWie, input[name], #bDag').forEach(i => i.addEventListener('change', ververs));
+      bg.querySelector('#bTekst').addEventListener('input', e => { bg.querySelector('#bTeller').textContent = e.target.value.length + ' / 500'; });
+      ververs();
+    });
+    if (!res) return;
+    const ok = await A.bezig(null, async () => {
+      for (const m of res.naar) await A.melding(m.id, res.tekst, { titel: res.titel || undefined });
+      if (res.prik) await Store.insert('berichten', { titel: res.titel || 'Mededeling', tekst: res.tekst, belangrijk: false, geplaatst: new Date().toISOString() });
+      await herlaad();
+      return true;
+    });
+    if (!ok) return;
+    A.toast(`Bericht verstuurd naar ${res.naar.length} ${res.naar.length === 1 ? 'persoon' : 'mensen'}`, 'ok');
+    if (res.prik && (location.hash || '').startsWith('#prikbord')) pPrikbord();
+  }
+
   function pPrikbord() {
     const b = A.data.berichten.slice().sort((a, b) => (b.geplaatst || '').localeCompare(a.geplaatst || ''));
-    hoofd.innerHTML = `<div class="kop"><h1>Prikbord</h1><button class="knop primair" id="nieuwBericht">+ Bericht</button></div>
+    hoofd.innerHTML = `<div class="kop"><h1>Prikbord</h1><div class="acties"><button class="knop" id="pbPush" type="button">🔔 Pushbericht sturen</button><button class="knop primair" id="nieuwBericht">+ Bericht</button></div></div>
       <p class="zacht">Mededelingen die het personeel bovenaan hun pagina ziet.</p>
       <div class="paneel">${b.length ? b.map(x => `<div class="bericht ${x.belangrijk ? 'belangrijk' : ''}"><div style="display:flex;gap:.5em;align-items:start"><div style="flex:1"><h4>${x.belangrijk ? '📣 ' : ''}${esc(x.titel)}</h4><p style="white-space:pre-wrap;margin:0 0 .2em">${esc(x.tekst)}</p><small class="zacht">${A.tijdGeleden(x.geplaatst)}</small></div><button class="icoon" data-bw="${x.id}">✏️</button></div></div>`).join('') : '<div class="leeg"><span class="groot">📌</span>Nog geen berichten</div>'}</div>`;
     $('#nieuwBericht').onclick = () => berichtModal(null);
+    $('#pbPush').onclick = () => berichtAanPersoneel();
     hoofd.querySelectorAll('[data-bw]').forEach(x => x.onclick = () => berichtModal(A.data.berichten.find(y => y.id === x.dataset.bw)));
   }
   async function berichtModal(b) {
