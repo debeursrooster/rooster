@@ -302,3 +302,11 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .mf-fns.verborgen { display: none !important; }
 .mf-fn { display: flex; align-items: center; justify-content: space-between; gap: .4em; margin: 0; font-size: .82rem; color: var(--inkt); }
 .mf-fn input { width: 58px; padding: .3em .4em; text-align: center; }
+
+/* ---------- meldingen wegvegen ---------- */
+.veeg { position: relative; overflow: hidden; border-bottom: 1px solid #f1ebe1; transition: max-height .2s, opacity .2s; max-height: 600px; }
+.veeg:last-child { border-bottom: 0; }
+.veeg .veeg-inhoud { position: relative; z-index: 1; background: #fff; border-bottom: 0; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.veeg .veeg-weg { position: absolute; top: 0; right: 0; bottom: 0; width: 84px; border: 0; background: var(--fout); color: #fff; font-size: 1.4rem; cursor: pointer; }
+.veeg.weg { max-height: 0; opacity: 0; }
+.veeg-tip { font-size: .8rem; margin: 0 0 .3em; }
