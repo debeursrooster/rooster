@@ -154,10 +154,10 @@
       ...komend.map(d => ({ datum: d.datum, start: d.start, html: (() => { const r = actieveRuil(d.id);
         return dienstItem(d, r ? (r.van_id === ik.id ? `<button class="knop klein" data-intrek="${r.id}">Intrekken</button>` : '') : '',
           ); })() })),
-      ...mijnOpgegeven().map(e => ({ datum: e.datum, start: e.start, html: `<div class="item onbevestigd"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+      ...mijnOpgegeven().map(e => { const bev = (mijnReactie(e) || {}).bevestigd_functie; return { datum: e.datum, start: e.start, html: `<div class="item ${bev ? '' : 'onbevestigd'}"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
         <div style="min-width:0"><div class="wie">${esc(e.start)}–${esc(e.eind)} <span class="label zaal">${A.LOC.zalen}</span></div>
         <div class="meta">${esc(A.datumLang(e.datum))} · 🎉 ${esc(e.naam)}</div>
-        <div class="meta">⏳ Jij kunt – nog niet bevestigd</div></div></div>` }))
+        <div class="meta">${bev ? `<b style="color:var(--ok)">✓ Bevestigd</b>${bev !== 'bevestigd' ? ' · ' + esc(bev) : ''}` : '⏳ Jij kunt – nog niet bevestigd'}</div></div></div>` }; })
     ].sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
     const perMaand = {};
     regels.forEach(r => (perMaand[r.datum.slice(0, 7)] = perMaand[r.datum.slice(0, 7)] || []).push(r.html));
@@ -179,7 +179,10 @@
       return `<div class="item" style="flex-wrap:wrap"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
         <div style="flex:1;min-width:150px"><div class="wie">${esc(e.naam)}</div><div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)}${fns.length ? ' · ' + fns.map(esc).join('/') : ''}</div>
         <div class="meta">Reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>
-        <label class="schuif"><input type="checkbox" data-reac="${e.id}" ${r && r.kan ? 'checked' : ''}><span class="baan"><i></i></span><span class="schuif-tekst">${r && r.kan ? 'Ik kan' : 'Kan niet'}</span></label></div>`; };
+        ${r && r.kan && r.bevestigd_functie
+          ? `<div style="flex-basis:100%;display:flex;align-items:center;gap:.6em;justify-content:flex-end;flex-wrap:wrap"><label class="schuif" title="Bevestigd"><input type="checkbox" checked disabled><span class="baan"><i></i></span><span class="schuif-tekst">🔒 Bevestigd</span></label>
+             <small class="zacht" style="flex-basis:100%;text-align:right">Kun je toch niet? Neem contact op met ${esc(beheerNaam())} of regel zelf een vervanger.</small></div>`
+          : `<label class="schuif"><input type="checkbox" data-reac="${e.id}" ${r && r.kan ? 'checked' : ''}><span class="baan"><i></i></span><span class="schuif-tekst">${r && r.kan ? 'Ik kan' : 'Kan niet'}</span></label>`}</div>`; };
     zetGezien(uitvragen);
     $('#inhoud').innerHTML = `
       ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
@@ -257,6 +260,7 @@
       await A.reload();
       const ev = A.event(e.id);
       if (!ev || ev.status !== 'open') { A.toast('De termijn voor dit feest is al voorbij', 'fout'); return ververs(); }
+      if ((mijnReactie(ev) || {}).bevestigd_functie) { A.toast('Je bent al bevestigd. Neem contact op met ' + beheerNaam() + ' als je toch niet kunt.', 'fout'); return ververs(); }
       const bestaand = mijnReactie(ev);
       if (bestaand) await Store.update('event_reacties', bestaand.id, { kan, tijd: new Date().toISOString() });
       else await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: new Date().toISOString() });

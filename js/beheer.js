@@ -688,7 +688,7 @@
   function uitvraagOverzicht(e) {
     const st = uitvraagStand(e);
     const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
-    const kanMw = st.reac.filter(r => r.kan).map(r => A.mw(r.medewerker_id)).filter(Boolean);
+    const kanMw = st.reac.filter(r => r.kan).map(r => { const m = A.mw(r.medewerker_id); return m && (r.bevestigd_functie ? { ...m, naam: '🔒 ' + m.naam } : m); }).filter(Boolean);
     const nietMw = st.reac.filter(r => !r.kan).map(r => A.mw(r.medewerker_id)).filter(Boolean);
     const wachtMw = st.groep.filter(m => !st.reac.some(r => r.medewerker_id === m.id));
     // per functie: hoeveel van de 'kan'-mensen kunnen die functie doen
@@ -922,13 +922,16 @@
     let reactieHtml = '';
     if (!nieuw && e.uitvraag) {
       const st = uitvraagStand(e);
-      const regel = m => { const r = st.reac.find(r => r.medewerker_id === m.id); return `<div class="item" style="padding:.35em 0"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}</span></div>`; };
+      const regel = m => { const r = st.reac.find(r => r.medewerker_id === m.id);
+        const bev = r && r.kan && r.bevestigd_functie;
+        const knop = r && r.kan && e.status === 'open' ? (bev ? `<button class="knop klein plat" type="button" data-bev-weg="${r.id}">Intrekken</button>` : `<button class="knop klein ok" type="button" data-bev="${r.id}">Bevestigen</button>`) : '';
+        return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
         <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
         ${e.status === 'concept' || e.status === 'ingepland' ? `<div class="meta" style="margin-bottom:.4em">${e.status === 'concept' ? '<b>Ingepland, nog niet verstuurd:</b> ' : '<b>Ingepland:</b> '}${A.data.diensten.filter(x => x.event_id === e.id).map(x => esc(x.functie) + ' ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</div>` : ''}
         ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
         ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de uitvraag gaat weer open. Reacties blijven staan.</small></div>' : ''}
-        ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">"Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
+        ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
     }
     const uitvraagHtml = (nieuw || e.status === 'open' || !e.status) ? `
       <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em">
@@ -984,6 +987,32 @@
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
         A.toast(`${e.naam} verstuurd – ${n} melding(en)`, 'ok');
       });
+      // iemand alvast bevestigen / bevestiging intrekken
+      const omschr = ev0 => `${ev0.naam} op ${A.datumLang(ev0.datum)} (${ev0.start}–${ev0.eind})`;
+      bg.querySelectorAll('[data-bev]').forEach(k => k.onclick = () => A.bezig(k, async () => {
+        const r = A.data.event_reacties.find(x => x.id === k.dataset.bev), m = A.mw(r.medewerker_id), ev0 = A.event(e.id);
+        const alle = [...new Set((ev0.bezetting || []).filter(b => +b.aantal > 0).map(b => b.functie))];
+        const eigen = alle.filter(f => (m.functies || []).includes(f));
+        const keuze = eigen.length ? eigen : alle;
+        let functie = keuze[0] || '';
+        if (keuze.length > 1) {
+          functie = await A.modal('Bevestigen: ' + m.naam, `<p>Voor welke functie bevestig je ${esc(m.naam)} bij ${esc(omschr(ev0))}?</p>
+            <div class="veld"><select id="bevFn">${keuze.map(f => `<option>${esc(f)}</option>`).join('')}</select></div>`,
+            [{ label: 'Annuleren', waarde: null }, { label: 'Bevestigen', soort: 'ok', waarde: b2 => b2.querySelector('#bevFn').value }]);
+          if (!functie) return;
+        } else if (!await A.bevestig('Bevestigen', `${m.naam} alvast bevestigen voor ${omschr(ev0)}${functie ? ' als ' + functie : ''}? ${m.naam} krijgt meteen een melding en kan het daarna zelf niet meer uitzetten.`, 'Bevestigen')) return;
+        await Store.update('event_reacties', r.id, { bevestigd_functie: functie || 'bevestigd' });
+        await A.melding(m.id, `✅ Je bent bevestigd voor ${omschr(ev0)}${functie ? ' als ' + functie : ''}. Kun je toch niet? Neem contact op met ${A.data.instellingen.beheer_naam || 'de baas'} of regel zelf een vervanger.`, { titel: 'Dienst bevestigd' });
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
+        A.toast(m.naam + ' is bevestigd', 'ok');
+      }));
+      bg.querySelectorAll('[data-bev-weg]').forEach(k => k.onclick = () => A.bezig(k, async () => {
+        const r = A.data.event_reacties.find(x => x.id === k.dataset.bevWeg), m = A.mw(r.medewerker_id), ev0 = A.event(e.id);
+        if (!await A.bevestig('Bevestiging intrekken', `De bevestiging van ${m.naam} voor ${omschr(ev0)} intrekken? ${m.naam} krijgt hier een melding van. De opgave "Ik kan" blijft staan.`, 'Intrekken')) return;
+        await Store.update('event_reacties', r.id, { bevestigd_functie: null });
+        await A.melding(m.id, `De bevestiging voor ${omschr(ev0)} is ingetrokken. Je opgave "Ik kan" blijft staan; na de termijn wordt het werk verdeeld.`);
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
+      }));
       const et = bg.querySelector('#eTerug');
       if (et) et.onclick = () => A.bezig(et, async () => {
         const ev0 = A.event(e.id), vandaag = G.today();

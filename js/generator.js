@@ -389,8 +389,20 @@
     const wie = new Array(n).fill(null);
     const zonder = (l, d) => { const i = l.indexOf(d); const c = l.slice(); if (i >= 0) c.splice(i, 1); return c; };
 
+    // 0: door de baas bevestigde mensen staan vast op hun feest (en worden daarna niet meer verschoven)
+    const vast = new Array(n).fill(false);
+    for (const r of (data.event_reacties || []).filter(r => r.kan && r.bevestigd_functie)) {
+      const m = perId[r.medewerker_id]; if (!m) continue;
+      let i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id && d.functie === r.bevestigd_functie);
+      if (i < 0) i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id && (m.functies || []).includes(d.functie));
+      if (i < 0) i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id);
+      if (i < 0) continue;
+      const d = diensten[i];
+      wie[i] = m.id; d.medewerker_id = m.id; lijst[m.id].push(d); kost[m.id] = kosten(ctx, m, lijst[m.id], maanden).totaal; vast[i] = true;
+    }
+
     // 1 + 2: opbouwen
-    const volgorde = diensten.map((d, i) => i).sort((a, b) => kand[a].length - kand[b].length || tijd(diensten[a]).a - tijd(diensten[b]).a);
+    const volgorde = diensten.map((d, i) => i).filter(i => !vast[i]).sort((a, b) => kand[a].length - kand[b].length || tijd(diensten[a]).a - tijd(diensten[b]).a);
     for (const i of volgorde) {
       const d = diensten[i];
       let beste = null, besteK = Infinity, besteDelta = Infinity;
@@ -414,7 +426,7 @@
       if ((it & 1023) === 0 && nu() - t0 > maxTijd) break;
       const T = T0 * Math.pow(T1 / T0, it / maxIt);
       const i = Math.floor(toeval() * n), d = diensten[i], a = wie[i];
-      if (!kand[i].length) continue;
+      if (!kand[i].length || vast[i]) continue;
       let delta, toepassen;
       if (toeval() < 0.5 || !a) {
         // dienst aan iemand anders geven
@@ -429,7 +441,7 @@
       } else {
         // twee mensen laten ruilen
         const j = Math.floor(toeval() * n), b = wie[j], e = diensten[j];
-        if (!b || b === a || !kandSet[j].has(a) || !kandSet[i].has(b)) continue;
+        if (!b || b === a || vast[j] || !kandSet[j].has(a) || !kandSet[i].has(b)) continue;
         const la = zonder(lijst[a], d), lb = zonder(lijst[b], e);
         if (pastErbij(perId[a], e, la) || pastErbij(perId[b], d, lb)) continue;
         la.push(e); lb.push(d);
