@@ -527,7 +527,7 @@
         open++;
         const ctx = G.context(tmp, tmp.diensten.filter(y => y.id !== x.id));
         for (const k of G.kandidaten(ctx, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.id !== z.medewerker_id))
-          await A.melding(k.m.id, `🆘 Er is een open dienst door ziekte: ${om}. Kun jij? Pak hem op bij Mijn diensten.`);
+          await A.melding(k.m.id, `🆘 Er is een open dienst door ziekte: ${om}. Kun jij? Pak hem op bij Beschikbaar.`);
       }
     }
     await A.melding(z.medewerker_id, `Je ziekmelding is bevestigd. Beterschap! Meld je beter in de app zodra je weer kunt werken.`);

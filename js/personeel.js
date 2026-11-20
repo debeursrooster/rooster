@@ -71,6 +71,10 @@
   // Lopende uitvragen waar ik op mag reageren
   const mijnUitvragen = () => A.data.zalen_events.filter(e => e.status === 'open' && e.datum >= G.today() && G.uitvraagGroep(e, A.data).some(m => m.id === ik.id))
     .sort((a, b) => a.datum.localeCompare(b.datum));
+  const gezienSleutel = () => 'rooster_gezien_' + ik.id;
+  const gezien = () => { try { return JSON.parse(localStorage.getItem(gezienSleutel()) || '[]'); } catch (x) { return []; } };
+  const zetGezien = evs => { try { localStorage.setItem(gezienSleutel(), JSON.stringify([...new Set([...gezien(), ...evs.map(e => e.id)])].slice(-200))); } catch (x) { } };
+  const nieuweUitvragen = () => { const g = gezien(); return mijnUitvragen().filter(e => !mijnReactie(e) && !g.includes(e.id)); };
   const mijnReactie = e => A.data.event_reacties.find(r => r.event_id === e.id && r.medewerker_id === ik.id);
   const mijnDiensten = () => A.data.diensten.filter(d => d.medewerker_id === ik.id && zichtbaar(d)).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
   const tijd = d => esc(d.start) + '–' + esc(d.eind);
@@ -101,67 +105,91 @@
     $('#urenBalk').innerHTML = `${A.uren(uren)} uur ingepland in ${A.MAANDEN[+maand.slice(5) - 1]}${doel ? ` <span style="opacity:.7">van ~${Math.round(doel)}</span>` : ''}${doel ? `<div class="balk"><i style="width:${Math.min(100, uren / doel * 100)}%"></i></div>` : ''}`;
     const ongelezen = A.data.meldingen.filter(m => m.medewerker_id === ik.id && !m.gelezen).length;
     $('#belBadge').textContent = ongelezen; $('#belBadge').classList.toggle('verborgen', !ongelezen);
-    const nUit = mijnUitvragen().filter(e => !mijnReactie(e)).length;
-    const mijnKnop = document.querySelector('#onderbalk button[data-t=mijn]');
+    const nUit = nieuweUitvragen().length + openVoorMij().length;
+    const mijnKnop = document.querySelector('#onderbalk button[data-t=beschikbaar]');
     let mb = mijnKnop.querySelector('.badge'); if (!mb) { mb = document.createElement('span'); mb.className = 'badge'; mijnKnop.appendChild(mb); }
     mb.textContent = nUit; mb.classList.toggle('verborgen', !nUit);
     const nRuil = ruilAanbod().length + verzoekenAanMij().length;
     $('#ruilBadge').textContent = nRuil; $('#ruilBadge').classList.toggle('verborgen', !nRuil);
-    ({ mijn: tMijn, rooster: tRooster, vrij: tVrij, ruil: tRuil })[tab]();
+    ({ mijn: tMijn, beschikbaar: tBeschikbaar, rooster: tRooster, vrij: tVrij, ruil: tRuil })[tab]();
   }
 
   // ---------------- tab: mijn diensten ----------------
-  function dienstItem(d, knoppen) {
+  function dienstItem(d, knoppen, klasse, status) {
     const ev = d.event_id && A.event(d.event_id);
     const ruil = actieveRuil(d.id);
     const collegas = A.data.diensten.filter(x => x.datum === d.datum && x.id !== d.id && x.medewerker_id && x.locatie === d.locatie && G.overlap(x, d)).map(x => A.mwNaam(x.medewerker_id));
-    return `<div class="item"><div class="datumblok ${d.locatie}"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
+    return `<div class="item ${klasse || ''}"><div class="datumblok ${d.locatie}"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
       <div style="min-width:0"><div class="wie">${tijd(d)} <span class="label ${d.locatie === 'zalen' ? 'zaal' : 'caf'}">${A.LOC[d.locatie]}</span></div>
       <div class="meta">${esc(A.datumLang(d.datum))} · ${esc(d.functie)}${ev ? ' · 🎉 ' + esc(ev.naam) : ''}</div>
       ${collegas.length ? `<div class="meta">Met: ${collegas.map(esc).join(', ')}</div>` : ''}
       ${d.notitie ? `<div class="meta">📝 ${esc(d.notitie)}</div>` : ''}
+      ${status || ''}
       ${ruil ? `<div class="meta" style="color:var(--let)">🔁 ${ruil.terug_dienst_id === d.id ? 'Onderdeel van een ruil met ' + esc(A.mwNaam(ruil.van_id)) + (ruil.status === 'overgenomen' ? ' – wacht op goedkeuring' : '') : ruil.status === 'open' ? 'Aangeboden om te ruilen' : ruil.status === 'gevraagd' ? 'Gevraagd aan ' + esc(A.mwNaam(ruil.naar_id)) + ' – wacht op bevestiging' : esc(A.mwNaam(ruil.naar_id)) + ' neemt over – wacht op goedkeuring baas'}</div>` : ''}</div>
       <div class="rechts">${knoppen || ''}</div></div>`;
   }
 
+  // Feesten waarvoor ik "Ik kan" heb gezegd en die nog niet definitief zijn ingepland
+  const mijnOpgegeven = () => A.data.zalen_events.filter(e => e.datum >= G.today() && e.status !== 'ingepland' && e.status !== 'geannuleerd' && (mijnReactie(e) || {}).kan === true);
+
   function tMijn() {
-    const nu = G.today(), komend = mijnDiensten().filter(d => d.datum >= nu);
-    const berichten = A.data.berichten.slice().sort((a, b) => (b.belangrijk - a.belangrijk) || (b.geplaatst || '').localeCompare(a.geplaatst || '')).slice(0, 3);
-    const open = openVoorMij();
-    const concept = A.data.roosters.find(r => r.status === 'concept' && r.maand > G.monthOf(nu));
-    const perMaand = {};
-    komend.forEach(d => (perMaand[d.maand] = perMaand[d.maand] || []).push(d));
-    const uitvragen = mijnUitvragen();
-    const uitvraagItem = e => { const r = mijnReactie(e); const fns = [...new Set((e.bezetting || []).map(b => b.functie))].filter(f => (ik.functies || []).includes(f));
-      return `<div class="item" style="flex-wrap:wrap"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
-        <div style="flex:1;min-width:150px"><div class="wie">${esc(e.naam)}</div><div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)}${fns.length ? ' · ' + fns.map(esc).join('/') : ''}</div>
-        <div class="meta">Reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>
-        <div class="rechts" style="gap:.3em"><button class="knop klein ${r && r.kan ? 'ok' : ''}" data-reac="${e.id}" data-kan="1">${r && r.kan ? '✓ ' : ''}Ik kan</button><button class="knop klein ${r && !r.kan ? 'primair' : ''}" data-reac="${e.id}" data-kan="0">${r && !r.kan ? '✕ ' : ''}Kan niet</button></div></div>`; };
-    const ziek = mijnZiek();
-    $('#inhoud').innerHTML = `
-      <div id="mPush"></div>
-      ${ziek ? `<div class="paneel" style="border:2px solid var(--fout-licht)"><div class="paneel-kop"><h3>🤒 Je bent ziek gemeld</h3><button class="knop klein ok" id="beterKnop">Ik ben weer beter</button></div>
-        <p class="zacht" style="margin:0">Sinds ${esc(A.datumLang(ziek.van))}${ziek.status === 'gemeld' ? ` · nog niet bevestigd door ${esc(A.data.instellingen.beheer_naam || 'de baas')}` : ''}. Beterschap!</p></div>`
-        : `<button class="knop" id="ziekKnop" style="width:100%;justify-content:center;margin-bottom:1em;border-color:var(--fout);color:var(--fout);background:#fff">🤒 Ziek melden</button>`}
-      ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
-        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Geef per feest aan of je kunt. Na de termijn wordt het rooster gemaakt en het werk eerlijk verdeeld. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
-        ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
-      ${berichten.length ? `<div class="paneel"><div class="paneel-kop"><h3>📌 Prikbord</h3></div>${berichten.map(b => `<div class="bericht ${b.belangrijk ? 'belangrijk' : ''}"><h4>${esc(b.titel)}</h4><p style="white-space:pre-wrap;margin:0">${esc(b.tekst)}</p><small class="zacht">${A.tijdGeleden(b.geplaatst)}</small></div>`).join('')}</div>` : ''}
-      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.slice(0, 5).map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`)).join('')}</div>` : ''}
-      <div class="paneel"><div class="paneel-kop"><h3>Mijn diensten</h3>${komend.length ? '<button class="knop klein" id="agenda">📲 In mijn agenda</button>' : ''}</div>
-        ${concept ? `<p class="zacht" style="font-size:.88rem">Het rooster voor ${esc(A.maandNaam(concept.maand))} wordt nog gemaakt.</p>` : ''}
-        ${komend.length ? Object.keys(perMaand).map(m => `<h4 style="text-transform:capitalize;margin:.8em 0 0;color:var(--zacht);font-size:.85rem">${esc(A.maandNaam(m))}</h4>${perMaand[m].map(d => { const r = actieveRuil(d.id); return dienstItem(d, r ? (r.van_id === ik.id ? `<button class="knop klein" data-intrek="${r.id}">Intrekken</button>` : '') : `<button class="knop klein" data-ruil="${d.id}">Kan niet</button>`); }).join('')}`).join('')
-          : '<div class="leeg"><span class="groot">🛋️</span>Geen diensten gepland</div>'}
-      </div>`;
+    const komend = mijnDiensten().filter(d => d.datum >= G.today());
+    $('#inhoud').innerHTML = `<div id="mPush"></div><div id="mijnInhoud"></div>`;
+    tMijnLijst(komend);
     koppelActies();
     tekenPush();
-    if ($('#ziekKnop')) $('#ziekKnop').onclick = ziekMelden;
-    if ($('#beterKnop')) $('#beterKnop').onclick = beterMelden;
     const ag = $('#agenda');
     if (ag) ag.onclick = () => {
       A.download('mijn-diensten.ics', A.ics(komend, A.data.instellingen.bedrijfsnaam), 'text/calendar');
       A.toast('Open het bestand om je diensten in je agenda te zetten');
     };
+  }
+
+  // Alles wat ik moet of misschien ga werken: groen = bevestigd, geel = opgegeven, wacht op bevestiging
+  function tMijnLijst(komend) {
+    const nu = G.today();
+    const berichten = A.data.berichten.slice().sort((a, b) => (b.belangrijk - a.belangrijk) || (b.geplaatst || '').localeCompare(a.geplaatst || '')).slice(0, 3);
+    const concept = A.data.roosters.find(r => r.status === 'concept' && r.maand > G.monthOf(nu));
+    const regels = [
+      ...komend.map(d => ({ datum: d.datum, start: d.start, html: (() => { const r = actieveRuil(d.id);
+        return dienstItem(d, r ? (r.van_id === ik.id ? `<button class="knop klein" data-intrek="${r.id}">Intrekken</button>` : '') : `<button class="knop klein" data-ruil="${d.id}">Kan niet</button>`,
+          ); })() })),
+      ...mijnOpgegeven().map(e => ({ datum: e.datum, start: e.start, html: `<div class="item onbevestigd"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${esc(e.start)}–${esc(e.eind)} <span class="label zaal">${A.LOC.zalen}</span></div>
+        <div class="meta">${esc(A.datumLang(e.datum))} · 🎉 ${esc(e.naam)}</div>
+        <div class="meta">⏳ Jij kunt – nog niet bevestigd</div></div></div>` }))
+    ].sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
+    const perMaand = {};
+    regels.forEach(r => (perMaand[r.datum.slice(0, 7)] = perMaand[r.datum.slice(0, 7)] || []).push(r.html));
+    $('#mijnInhoud').innerHTML = `
+      ${berichten.length ? `<div class="paneel"><div class="paneel-kop"><h3>📌 Prikbord</h3></div>${berichten.map(b => `<div class="bericht ${b.belangrijk ? 'belangrijk' : ''}"><h4>${esc(b.titel)}</h4><p style="white-space:pre-wrap;margin:0">${esc(b.tekst)}</p><small class="zacht">${A.tijdGeleden(b.geplaatst)}</small></div>`).join('')}</div>` : ''}
+      <div class="paneel"><div class="paneel-kop"><h3>Mijn diensten</h3>${komend.length ? '<button class="knop klein" id="agenda">📲 In mijn agenda</button>' : ''}</div>
+        ${regels.some(r => r.html.includes('onbevestigd')) ? '<p class="zacht" style="font-size:.82rem;margin:-.2em 0 .3em">Grijs = je hebt aangegeven dat je kunt, maar het is nog niet bevestigd.</p>' : ''}
+        ${concept ? `<p class="zacht" style="font-size:.88rem">Het rooster voor ${esc(A.maandNaam(concept.maand))} wordt nog gemaakt.</p>` : ''}
+        ${regels.length ? Object.keys(perMaand).sort().map(m => `<h4 style="text-transform:capitalize;margin:.8em 0 .3em;color:var(--zacht);font-size:.85rem">${esc(A.maandNaam(m))}</h4>${perMaand[m].join('')}`).join('')
+          : '<div class="leeg"><span class="groot">🛋️</span>Geen diensten gepland<br><a href="#" id="naarBeschikbaar">Bekijk de beschikbare diensten</a></div>'}
+      </div>`;
+    const nb = $('#naarBeschikbaar'); if (nb) nb.onclick = e => { e.preventDefault(); tab = 'beschikbaar'; teken(); window.scrollTo(0, 0); };
+  }
+
+  // Feesten waarvoor gevraagd wordt wie kan + open diensten die ik kan oppakken
+  function tBeschikbaar() {
+    const open = openVoorMij(), uitvragen = mijnUitvragen();
+    const uitvraagItem = e => { const r = mijnReactie(e); const fns = [...new Set((e.bezetting || []).map(b => b.functie))].filter(f => (ik.functies || []).includes(f));
+      return `<div class="item" style="flex-wrap:wrap"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+        <div style="flex:1;min-width:150px"><div class="wie">${esc(e.naam)}</div><div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)}${fns.length ? ' · ' + fns.map(esc).join('/') : ''}</div>
+        <div class="meta">Reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>
+        <label class="schuif"><input type="checkbox" data-reac="${e.id}" ${r && r.kan ? 'checked' : ''}><span class="baan"><i></i></span><span class="schuif-tekst">${r && r.kan ? 'Ik kan' : 'Kan niet'}</span></label></div>`; };
+    zetGezien(uitvragen);
+    $('#inhoud').innerHTML = `
+      ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
+        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Zet de schuif aan (groen) als je kunt. Laat je hem grijs, dan kun je niet. Zet je hem aan, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
+        ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
+      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`)).join('')}</div>` : ''}
+      ${!uitvragen.length && !open.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
+    koppelActies();
+    const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
+    if (mb) { const n = open.length; mb.textContent = n; mb.classList.toggle('verborgen', !n); }
   }
 
   // ---------------- ziek melden ----------------
@@ -221,8 +249,11 @@
       if (r.naar_id) await A.melding(r.naar_id, `${ik.naam} heeft het ruilverzoek ingetrokken. Er verandert niets aan jouw diensten.`);
       await ververs(); A.toast('Ruilverzoek ingetrokken');
     }));
-    document.querySelectorAll('[data-reac]').forEach(b => b.onclick = () => A.bezig(b, async () => {
-      const e = A.event(b.dataset.reac), kan = b.dataset.kan === '1';
+    document.querySelectorAll('[data-reac]').forEach(b => b.onchange = async () => {
+      const e = A.event(b.dataset.reac), kan = b.checked;
+      b.nextElementSibling.nextElementSibling.textContent = kan ? 'Ik kan' : 'Kan niet';
+      b.disabled = true;
+      try {
       await A.reload();
       const ev = A.event(e.id);
       if (!ev || ev.status !== 'open') { A.toast('De termijn voor dit feest is al voorbij', 'fout'); return ververs(); }
@@ -230,7 +261,8 @@
       if (bestaand) await Store.update('event_reacties', bestaand.id, { kan, tijd: new Date().toISOString() });
       else await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: new Date().toISOString() });
       await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
-    }));
+      } catch (x) { A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
+    });
     document.querySelectorAll('[data-pak]').forEach(b => b.onclick = () => pakOpen(A.data.diensten.find(d => d.id === b.dataset.pak), b));
     document.querySelectorAll('[data-neem]').forEach(b => b.onclick = () => neemOver(A.data.ruilverzoeken.find(r => r.id === b.dataset.neem), b));
     document.querySelectorAll('[data-weiger]').forEach(b => b.onclick = () => weigerRuil(A.data.ruilverzoeken.find(r => r.id === b.dataset.weiger), b));
@@ -367,12 +399,9 @@
 
   // ---------------- tab: vrij vragen ----------------
   function tVrij() {
-    const nu = G.today(), ins = A.data.instellingen;
+    const nu = G.today();
     const mijnVerlof = A.data.verlof.filter(v => v.medewerker_id === ik.id && v.tot >= G.addDays(nu, -30)).sort((a, b) => b.van.localeCompare(a.van));
-    const mijnNb = A.data.beschikbaarheid.filter(b => b.medewerker_id === ik.id && b.datum >= nu).sort((a, b) => a.datum.localeCompare(b.datum));
-    const volgende = G.nextMonth(G.monthOf(nu));
-    const slotDatum = G.prevMonth(volgende) + '-' + G.pad(Math.min(+ins.beschikbaarheid_slot || 25, G.daysInMonth(G.prevMonth(volgende))));
-    const gemaakt = !!A.rooster(volgende);
+    const ziek = mijnZiek();
     $('#inhoud').innerHTML = `
       <div class="paneel"><div class="paneel-kop"><h3>🌴 Vrij vragen</h3></div>
         <div class="rij"><div class="veld"><label>Van</label><input type="date" id="vVan" min="${nu}"></div><div class="veld"><label>Tot en met</label><input type="date" id="vTot" min="${nu}"></div></div>
@@ -382,14 +411,13 @@
           <div class="meta">${esc(v.reden || '')}${v.reactie ? ' · 💬 ' + esc(v.reactie) : ''}</div></div>
           <div class="rechts"><span class="label ${v.status === 'goedgekeurd' ? 'ok' : v.status === 'afgewezen' ? 'fout' : 'let'}">${v.status === 'aangevraagd' ? 'in behandeling' : v.status}</span>${v.status === 'aangevraagd' ? `<button class="icoon" data-vweg="${v.id}" title="Intrekken">✕</button>` : ''}</div></div>`).join('')}` : ''}
       </div>
-      <div class="paneel"><div class="paneel-kop"><h3>🚫 Ik kan niet op…</h3></div>
-        <p class="zacht" style="font-size:.9rem">Geen echt vrij nodig, maar kun je een keer niet? Geef het op tijd door, dan houdt het rooster er rekening mee. ${!gemaakt ? `Voor <b>${esc(A.maandNaam(volgende))}</b> graag vóór <b>${esc(A.datumLang(slotDatum))}</b>.` : ''}</p>
-        <div class="rij"><div class="veld"><label>Datum</label><input type="date" id="bDatum" min="${nu}"></div>
-          <div class="veld"><label>Wanneer</label><select id="bDeel"><option>hele dag</option><option>overdag</option><option>avond</option></select></div></div>
-        <div class="veld"><label>Opmerking <small>(optioneel)</small></label><input id="bOpm"></div>
-        <button class="knop" id="bToevoegen">Doorgeven</button>
-        ${mijnNb.length ? `<div style="margin-top:1em">${mijnNb.map(b => { const ingepland = A.data.diensten.some(d => d.medewerker_id === ik.id && d.datum === b.datum && zichtbaar(d)); return `<div class="item"><div><div class="wie">${esc(A.datumLang(b.datum))}</div><div class="meta">${esc(b.deel)}${b.opmerking ? ' · ' + esc(b.opmerking) : ''}</div>${ingepland ? '<div class="meta" style="color:var(--let)">⚠️ Je staat al ingepland. Ruil de dienst of vraag vrij.</div>' : ''}</div><div class="rechts"><button class="icoon" data-bweg="${b.id}">✕</button></div></div>`; }).join('')}</div>` : ''}
-      </div>`;
+      ${ziek ? `<div class="paneel" style="border:2px solid var(--fout-licht)"><div class="paneel-kop"><h3>🤒 Je bent ziek gemeld</h3><button class="knop klein ok" id="beterKnop">Ik ben weer beter</button></div>
+        <p class="zacht" style="margin:0">Sinds ${esc(A.datumLang(ziek.van))}${ziek.status === 'gemeld' ? ` · nog niet bevestigd door ${esc(beheerNaam())}` : ''}. Beterschap!</p></div>`
+        : `<div class="paneel"><div class="paneel-kop"><h3>🤒 Ziek melden</h3></div>
+        <p class="zacht" style="font-size:.9rem">Ben je ziek? Meld je hier af voor je diensten en bel daarna even ${esc(beheerNaam())}.</p>
+        <button class="knop" id="ziekKnop" style="width:100%;justify-content:center;border-color:var(--fout);color:var(--fout);background:#fff">🤒 Ik ben ziek</button></div>`}`;
+    if ($('#ziekKnop')) $('#ziekKnop').onclick = ziekMelden;
+    if ($('#beterKnop')) $('#beterKnop').onclick = beterMelden;
     $('#vVan').onchange = () => { if (!$('#vTot').value || $('#vTot').value < $('#vVan').value) $('#vTot').value = $('#vVan').value; };
     $('#vAanvragen').onclick = e => A.bezig(e.target, async () => {
       const van = $('#vVan').value, tot = $('#vTot').value || van;
@@ -399,13 +427,7 @@
       await A.melding(null, `${ik.naam} vraagt vrij: ${A.datumKort(van)}${tot !== van ? ' t/m ' + A.datumKort(tot) : ''}${$('#vReden').value ? ' (' + $('#vReden').value + ')' : ''}.`, { titel: 'Vrij-aanvraag ' + ik.naam, link: '#aanvragen/verlof' });
       await ververs(); A.toast('Aanvraag verstuurd', 'ok');
     });
-    $('#bToevoegen').onclick = e => A.bezig(e.target, async () => {
-      if (!$('#bDatum').value) return A.toast('Kies een datum', 'fout');
-      await Store.insert('beschikbaarheid', { medewerker_id: ik.id, datum: $('#bDatum').value, deel: $('#bDeel').value, opmerking: $('#bOpm').value });
-      await ververs(); A.toast('Doorgegeven', 'ok');
-    });
     document.querySelectorAll('[data-vweg]').forEach(b => b.onclick = async () => { if (await A.bevestig('Intrekken', 'Wil je deze aanvraag intrekken?', 'Intrekken')) { await Store.remove('verlof', b.dataset.vweg); await ververs(); } });
-    document.querySelectorAll('[data-bweg]').forEach(b => b.onclick = async () => { await Store.remove('beschikbaarheid', b.dataset.bweg); await ververs(); });
   }
 
   // ---------------- tab: ruilen ----------------
