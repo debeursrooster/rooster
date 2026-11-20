@@ -4,7 +4,7 @@
 (function () {
   const G = window.Gen, A = window.App, esc = A.esc;
   const $ = s => document.querySelector(s);
-  let ik = null, tab = 'mijn', weekStart = G.weekStart(G.today()), roosterLoc = 'alle', gekozenMw = null;
+  let ik = null, tab = 'mijn', weekStart = G.weekStart(G.today()), roosterLoc = 'alle', gekozenMw = null, roosterView = 'maand', roosterDag = G.today();
 
   async function start() {
     try { await A.reload(); }
@@ -386,29 +386,76 @@
   }
 
   // ---------------- tab: rooster (week) ----------------
+  // Rooster bekijken als maand, week of dag
+  function roosterDienstenOp(dag) {
+    return A.data.diensten.filter(x => x.datum === dag && zichtbaar(x) && (roosterLoc === 'alle' || x.locatie === roosterLoc))
+      .sort((a, b) => (a.locatie === b.locatie ? 0 : a.locatie === 'cafetaria' ? -1 : 1) || G.min(a.start) - G.min(b.start));
+  }
+  function dagBlok(dag, dicht) {
+    const nu = G.today(), pub = A.isGepubliceerd(G.monthOf(dag));
+    const ds = roosterDienstenOp(dag);
+    const evs = A.data.zalen_events.filter(e => e.datum === dag && roosterLoc !== 'cafetaria');
+    // open plekken met dezelfde functie en tijd samenvoegen
+    const rijen = [], open = new Map();
+    for (const x of ds) {
+      if (x.medewerker_id) { rijen.push({ x, n: 1 }); continue; }
+      const k = [x.event_id || '', x.locatie, x.functie, x.start, x.eind].join('|');
+      if (open.has(k)) open.get(k).n++; else { const g = { x, n: 1 }; open.set(k, g); rijen.push(g); }
+    }
+    return `<div class="dagrij ${dag === nu ? 'vandaag' : ''}"><div class="dk"><span style="text-transform:capitalize">${esc(A.datumLang(dag))}</span><span>${dag === nu ? 'vandaag' : ''}</span></div>
+      ${!pub && !ds.length ? '<div class="regel zacht">Rooster nog niet bekend</div>' : ''}
+      ${pub && dicht.has(dag) && roosterLoc !== 'zalen' ? `<div class="regel zacht">Cafetaria gesloten${dicht.get(dag) ? ' – ' + esc(dicht.get(dag)) : ''}</div>` : ''}
+      ${evs.filter(e => A.eventZichtbaar(e)).map(e => `<div class="ev">🎉 ${esc(e.naam)} · ${esc(e.start)}–${esc(e.eind)}</div>`).join('')}
+      ${rijen.map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="regel ${x.medewerker_id === ik.id ? 'mijn' : ''}"><span class="t">${tijd(x)}</span>${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span style="flex:1">${m ? esc(m.naam) : `<b style="color:var(--fout)">Open${n > 1 ? ' ' + n + '×' : ''}</b>`}</span><span class="zacht" style="font-size:.8rem">${esc(x.functie)}</span><span class="label ${x.locatie === 'zalen' ? 'zaal' : 'caf'}" style="font-size:.65rem">${x.locatie === 'zalen' ? 'Zaal' : 'Caf'}</span></div>`; }).join('')}
+      ${pub && !ds.length && !dicht.has(dag) ? '<div class="regel zacht">Geen diensten</div>' : ''}</div>`;
+  }
+
   function tRooster() {
     const nu = G.today();
-    const dagen = [...Array(7)].map((_, i) => G.addDays(weekStart, i));
     const dicht = new Map(A.data.sluitingsdagen.map(s => [s.datum, s.reden]));
+    const maand = G.monthOf(roosterDag), ws = G.weekStart(roosterDag);
+    let kop, inhoud, isNu;
+    if (roosterView === 'maand') {
+      kop = `<b style="text-transform:capitalize">${esc(A.maandNaam(maand))}</b>`;
+      isNu = maand === G.monthOf(nu);
+      const dagen = G.monthDays(maand), eerste = G.weekday(dagen[0]);
+      const cellen = [...Array(eerste)].map(() => '<div class="mk-dag leeg"></div>').concat(dagen.map(dag => {
+        const ds = roosterDienstenOp(dag), mijn = ds.filter(x => x.medewerker_id === ik.id);
+        const ev = A.data.zalen_events.some(e => e.datum === dag && roosterLoc !== 'cafetaria' && A.eventZichtbaar(e));
+        const opgegeven = mijnOpgegeven().some(e => e.datum === dag);
+        const openN = ds.filter(x => !x.medewerker_id).length;
+        return `<button class="mk-dag ${dag === nu ? 'vandaag' : ''} ${dag < nu ? 'voorbij' : ''} ${mijn.length ? 'werk' : ''}" data-dag="${dag}">
+          <span class="nr">${G.parse(dag).getUTCDate()}</span>
+          ${mijn.length ? `<span class="mk-tijd">${mijn[0].start.replace(/:00$/, '')}–${mijn[0].eind.replace(/:00$/, '')}${mijn.length > 1 ? ' +' + (mijn.length - 1) : ''}</span>` : opgegeven ? '<span class="mk-tijd grijs">?</span>' : ''}
+          <span class="mk-stippen">${ev ? '<i class="st-ev"></i>' : ''}${openN ? '<i class="st-open"></i>' : ''}${dicht.has(dag) && roosterLoc !== 'zalen' ? '<i class="st-dicht"></i>' : ''}</span></button>`;
+      }));
+      inhoud = `<div class="paneel" style="padding:.7em"><div class="mk">${A.DAG_KORT.map(d => `<div class="mk-kop">${d}</div>`).join('')}${cellen.join('')}</div>
+        <div class="mk-legenda"><span><i class="st-werk"></i>Jij werkt</span><span><i class="st-ev"></i>Feest</span><span><i class="st-open"></i>Open plek</span><span><i class="st-dicht"></i>Gesloten</span></div>
+        ${A.isGepubliceerd(maand) ? '' : '<p class="zacht" style="font-size:.85rem;margin:.6em 0 0;text-align:center">Het rooster voor deze maand is nog niet bekend.</p>'}
+        <p class="zacht" style="font-size:.8rem;margin:.4em 0 0;text-align:center">Tik op een dag om die dag te bekijken.</p></div>`;
+    } else if (roosterView === 'week') {
+      const dagen = [...Array(7)].map((_, i) => G.addDays(ws, i));
+      kop = `<b>Week ${G.isoWeek(ws)}</b><br><small class="zacht">${esc(A.datumKort(dagen[0]))} – ${esc(A.datumKort(dagen[6]))}</small>`;
+      isNu = ws === G.weekStart(nu);
+      inhoud = dagen.map(dag => dagBlok(dag, dicht)).join('');
+    } else {
+      kop = `<b style="text-transform:capitalize">${esc(A.datumLang(roosterDag))}</b>${roosterDag === nu ? '<br><small class="zacht">vandaag</small>' : ''}`;
+      isNu = roosterDag === nu;
+      inhoud = dagBlok(roosterDag, dicht);
+    }
     $('#inhoud').innerHTML = `
-      <div class="weekkeuze"><button class="knop klein" id="wVorige">◀</button><div style="text-align:center"><b>Week ${G.isoWeek(weekStart)}</b><br><small class="zacht">${esc(A.datumKort(dagen[0]))} – ${esc(A.datumKort(dagen[6]))}</small></div><button class="knop klein" id="wVolgende">▶</button></div>
+      <div style="display:flex;justify-content:center;margin-bottom:.7em"><div class="tabs" id="rView"><button data-v="maand">Maand</button><button data-v="week">Week</button><button data-v="dag">Dag</button></div></div>
+      <div class="weekkeuze"><button class="knop klein" id="wVorige">◀</button><div style="text-align:center">${kop}</div><button class="knop klein" id="wVolgende">▶</button></div>
       <div style="display:flex;justify-content:center;margin-bottom:.8em"><div class="tabs" id="rLoc"><button data-v="alle">Alles</button><button data-v="cafetaria">Cafetaria</button><button data-v="zalen">Zalencentrum</button></div></div>
-      ${weekStart !== G.weekStart(nu) ? '<p style="text-align:center;margin-top:-.4em"><a href="#" id="naarNu">Naar deze week</a></p>' : ''}
-      ${dagen.map(dag => {
-        const pub = A.isGepubliceerd(G.monthOf(dag));
-        const ds = A.data.diensten.filter(x => x.datum === dag && zichtbaar(x) && (roosterLoc === 'alle' || x.locatie === roosterLoc)).sort((a, b) => (a.locatie === b.locatie ? 0 : a.locatie === 'cafetaria' ? -1 : 1) || G.min(a.start) - G.min(b.start));
-        const evs = A.data.zalen_events.filter(e => e.datum === dag && roosterLoc !== 'cafetaria');
-        return `<div class="dagrij ${dag === nu ? 'vandaag' : ''}"><div class="dk"><span style="text-transform:capitalize">${esc(A.datumLang(dag))}</span><span>${dag === nu ? 'vandaag' : ''}</span></div>
-          ${!pub && !ds.length ? '<div class="regel zacht">Rooster nog niet bekend</div>' : ''}
-          ${pub && dicht.has(dag) && roosterLoc !== 'zalen' ? `<div class="regel zacht">Cafetaria gesloten${dicht.get(dag) ? ' – ' + esc(dicht.get(dag)) : ''}</div>` : ''}
-          ${evs.filter(e => A.eventZichtbaar(e)).map(e => `<div class="ev">🎉 ${esc(e.naam)} · ${esc(e.start)}–${esc(e.eind)}</div>`).join('')}
-          ${ds.map(x => { const m = A.mw(x.medewerker_id); return `<div class="regel ${x.medewerker_id === ik.id ? 'mijn' : ''}"><span class="t">${tijd(x)}</span>${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span style="flex:1">${m ? esc(m.naam) : '<b style="color:var(--fout)">Open</b>'}</span><span class="zacht" style="font-size:.8rem">${esc(x.functie)}</span><span class="label ${x.locatie === 'zalen' ? 'zaal' : 'caf'}" style="font-size:.65rem">${x.locatie === 'zalen' ? 'Zaal' : 'Caf'}</span></div>`; }).join('')}
-          ${pub && !ds.length && !dicht.has(dag) ? '<div class="regel zacht">Geen diensten</div>' : ''}</div>`;
-      }).join('')}`;
-    $('#wVorige').onclick = () => { weekStart = G.addDays(weekStart, -7); tRooster(); };
-    $('#wVolgende').onclick = () => { weekStart = G.addDays(weekStart, 7); tRooster(); };
-    const nn = $('#naarNu'); if (nn) nn.onclick = e => { e.preventDefault(); weekStart = G.weekStart(nu); tRooster(); };
+      ${isNu ? '' : `<p style="text-align:center;margin-top:-.4em"><a href="#" id="naarNu">Naar vandaag</a></p>`}
+      ${inhoud}`;
+    const stap = r => roosterView === 'maand' ? (r > 0 ? G.nextMonth(maand) : G.prevMonth(maand)) + '-01' : G.addDays(roosterDag, roosterView === 'week' ? 7 * r : r);
+    $('#wVorige').onclick = () => { roosterDag = stap(-1); tRooster(); };
+    $('#wVolgende').onclick = () => { roosterDag = stap(1); tRooster(); };
+    const nn = $('#naarNu'); if (nn) nn.onclick = e => { e.preventDefault(); roosterDag = nu; tRooster(); };
+    document.querySelectorAll('#rView button').forEach(b => { b.classList.toggle('actief', b.dataset.v === roosterView); b.onclick = () => { roosterView = b.dataset.v; tRooster(); }; });
     document.querySelectorAll('#rLoc button').forEach(b => { b.classList.toggle('actief', b.dataset.v === roosterLoc); b.onclick = () => { roosterLoc = b.dataset.v; tRooster(); }; });
+    document.querySelectorAll('.mk-dag[data-dag]').forEach(b => b.onclick = () => { roosterDag = b.dataset.dag; roosterView = 'dag'; tRooster(); window.scrollTo(0, 0); });
   }
 
   // ---------------- tab: vrij vragen ----------------

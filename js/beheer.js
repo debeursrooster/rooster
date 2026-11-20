@@ -292,11 +292,12 @@
           <div class="dag-kop"><span>${A.DAG_KORT[i]}</span><span class="nr">${G.parse(dag).getUTCDate()}</span></div>
           ${isDicht && staat.loc !== 'zalen' ? `<span class="label">Cafetaria dicht${dicht.get(dag) ? ' · ' + esc(dicht.get(dag)) : ''}</span>` : ''}
           ${evs.map(e => { const vl = (vlPerDag[dag] || []).filter(x => x.event_id === e.id), vo = vl.filter(x => !x.medewerker_id).length;
+            const vlRijen = groepOpen(vl.sort((a, b) => !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start)));
             return `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>${vl.length ? `<div class="vl-kop ${vo ? 'fout' : 'ok'}" data-ev="${e.id}">⏳ voorlopig · ${vo ? vo + ' open' : 'rond'}</div>` : ''}` +
-              vl.sort((a, b) => !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start)).map(x => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – uitvraag loopt nog">
-                ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${esc(m ? m.naam : 'Open')}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join(''); }).join('')}
-          ${ds.map(x => { const m = A.mw(x.medewerker_id); return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}">
-            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${esc(m ? m.naam : 'Open')}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
+              vlRijen.map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – uitvraag loopt nog">
+                ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join(''); }).join('')}
+          ${groepOpen(ds).map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}">
+            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
           ${heeftRooster ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}
         </div>`;
       }
@@ -307,6 +308,18 @@
     el.querySelectorAll('.dienst:not(.voorlopig)').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
     el.querySelectorAll('[data-plus]').forEach(x => x.onclick = () => dienstModal(null, x.dataset.plus));
     el.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
+  }
+
+  // Open plekken met dezelfde functie en tijden samenvoegen tot één regel ("Open 3×"); ingevulde diensten blijven los
+  function groepOpen(lijst) {
+    const uit = [], open = new Map();
+    for (const x of lijst) {
+      if (x.medewerker_id) { uit.push({ x, n: 1 }); continue; }
+      const k = [x.event_id || '', x.locatie, x.functie, x.start, x.eind].join('|');
+      if (open.has(k)) open.get(k).n++;
+      else { const g = { x, n: 1 }; open.set(k, g); uit.push(g); }
+    }
+    return uit;
   }
 
   function renderPersonen(el, maand) {
