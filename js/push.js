@@ -75,6 +75,7 @@
     const j = sub.toJSON();
     await rpc('push_aanmelden', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_rol: rol, p_medewerker: medewerkerId || null });
     localStorage.setItem('push_' + rol, 'aan');
+    localStorage.removeItem('push_uit_' + rol);
   };
 
   P.uitzetten = async rol => {
@@ -89,9 +90,13 @@
     } catch (e) { console.warn(e); }
   };
 
-  // Bij het openen: abonnement opnieuw doorgeven (bv. andere medewerker op dit toestel, of nieuwe sleutels)
+  // Bij het openen en na inloggen: abonnement opnieuw doorgeven (bv. andere medewerker op dit toestel, of nieuwe sleutels).
+  // Heeft dit toestel al toestemming gegeven en zijn de meldingen niet bewust uitgezet, dan gaan ze vanzelf weer aan.
   P.vernieuw = async (rol, medewerkerId) => {
-    if (await P.status(rol) === 'aan') { try { await P.aanzetten(rol, medewerkerId); } catch (e) { console.warn(e); } }
+    const st = await P.status(rol);
+    const weerAan = st === 'uit' && Notification.permission === 'granted' && localStorage.getItem('push_uit_' + rol) !== '1';
+    if (st === 'aan' || weerAan) { try { await P.aanzetten(rol, medewerkerId); } catch (e) { console.warn(e); } }
+    if (weerAan) meld();
   };
 
   // ---------- het instelpaneel ----------
@@ -155,7 +160,7 @@
       }
       opnieuw();
     };
-    if (knop('uit')) knop('uit').onclick = async () => { await P.uitzetten(o.rol); toast('Meldingen staan uit op dit apparaat'); opnieuw(); };
+    if (knop('uit')) knop('uit').onclick = async () => { await P.uitzetten(o.rol); localStorage.setItem('push_uit_' + o.rol, '1'); toast('Meldingen staan uit op dit apparaat'); opnieuw(); };
     if (knop('test')) knop('test').onclick = async e => {
       e.target.disabled = true;
       try { await o.onTest(); toast('Testmelding verstuurd – kijk over een paar seconden op je telefoon', 'ok'); }

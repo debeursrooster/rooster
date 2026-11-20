@@ -42,7 +42,7 @@
       $('#login').classList.add('verborgen'); toonApp();
     } else { A.toast('Code klopt niet', 'fout'); $('#pin').value = ''; }
   };
-  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat? Je krijgt hier dan ook geen meldingen meer.', 'Uitloggen')) { await Push.uitzetten('personeel'); localStorage.removeItem('rooster_mw'); location.reload(); } };
+  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat? Zolang je uitgelogd bent, krijg je hier geen meldingen. Log je weer in, dan gaan ze vanzelf weer aan.', 'Uitloggen')) { await Push.uitzetten('personeel'); localStorage.removeItem('rooster_mw'); location.reload(); } };
 
   // ---------------- app & pushmeldingen ----------------
   const testPush = () => A.melding(ik.id, '🔔 Meldingen staan aan! Je krijgt hier voortaan bericht over je rooster, ruilverzoeken en feesten.', { titel: 'Meldingen werken' });
@@ -152,7 +152,7 @@
     const concept = A.data.roosters.find(r => r.status === 'concept' && r.maand > G.monthOf(nu));
     const regels = [
       ...komend.map(d => ({ datum: d.datum, start: d.start, html: (() => { const r = actieveRuil(d.id);
-        return dienstItem(d, r ? (r.van_id === ik.id ? `<button class="knop klein" data-intrek="${r.id}">Intrekken</button>` : '') : `<button class="knop klein" data-ruil="${d.id}">Kan niet</button>`,
+        return dienstItem(d, r ? (r.van_id === ik.id ? `<button class="knop klein" data-intrek="${r.id}">Intrekken</button>` : '') : '',
           ); })() })),
       ...mijnOpgegeven().map(e => ({ datum: e.datum, start: e.start, html: `<div class="item onbevestigd"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
         <div style="min-width:0"><div class="wie">${esc(e.start)}–${esc(e.eind)} <span class="label zaal">${A.LOC.zalen}</span></div>
