@@ -338,3 +338,7 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .push-opnieuw .check { display: flex; align-items: center; gap: .5em; } .push-opnieuw input[type=radio] { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
 
 .b-ontvangers { background: var(--accent-licht); border-radius: 8px; padding: .55em .8em; font-size: .88rem; margin-bottom: .9em; }
+.planner-punten { display: grid; gap: .35em; }
+.planner-punt { display: grid; grid-template-columns: minmax(0, 1fr) 11em; gap: .6em; align-items: center; padding: .35em 0; border-bottom: 1px solid rgba(0,0,0,.06); }
+.planner-punt span { font-size: .93rem; }
+@media (max-width: 520px) { .planner-punt { grid-template-columns: 1fr; gap: .2em; } }
