@@ -2,12 +2,13 @@ name: Automatisch rooster maken
 
 on:
   schedule:
-    - cron: '17 5 * * *'   # elke dag rond 06:17 / 07:17 Nederlandse tijd
+    - cron: '7 5 * * *'    # rooster maken rond 06:07 (wintertijd) / 07:07 (zomertijd) Nederlandse tijd
   workflow_dispatch:        # handmatig starten kan ook (tabblad Actions)
 
 jobs:
   rooster:
     runs-on: ubuntu-latest
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,3 +19,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # Meldingen pas om 09:00 Nederlandse tijd versturen (bij handmatig starten meteen)
+          WACHT_TOT: ${{ github.event_name == 'schedule' && '09:00' || '' }}
