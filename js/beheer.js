@@ -873,7 +873,8 @@
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
           const uv = e.status === 'open' ? uitvraagOverzicht(e) : null;
           const status = uv ? uv.rechts : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
-          return `<div class="item klik ${uv ? 'uv uv-' + uv.toestand : ''}" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
+          const kleur = uv ? 'uv uv-' + uv.toestand : ds.length && open ? 'uv ' + (open === ds.length ? 'uv-slecht' : 'uv-bijna') : '';
+          return `<div class="item klik ${kleur}" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
           <div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten${e.zaal ? ' · ' + esc(e.zaal) : ''} · ${(e.bezetting || []).map(b => b.aantal + '× ' + esc(b.functie)).join(', ') || '<span style="color:var(--fout)">geen bezetting opgegeven</span>'}</div>
           ${uv ? uv.meta : ''}
           ${ds.filter(x => x.medewerker_id).length ? `<div class="meta">👥 ${ds.filter(x => x.medewerker_id).map(x => esc(A.mwNaam(x.medewerker_id))).join(', ')}</div>` : ''}</div>
@@ -926,6 +927,7 @@
         <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
         ${e.status === 'concept' || e.status === 'ingepland' ? `<div class="meta" style="margin-bottom:.4em">${e.status === 'concept' ? '<b>Ingepland, nog niet verstuurd:</b> ' : '<b>Ingepland:</b> '}${A.data.diensten.filter(x => x.event_id === e.id).map(x => esc(x.functie) + ' ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</div>` : ''}
         ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
+        ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de uitvraag gaat weer open. Reacties blijven staan.</small></div>' : ''}
         ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">"Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
     }
     const uitvraagHtml = (nieuw || e.status === 'open' || !e.status) ? `
@@ -981,6 +983,24 @@
         const n = await Uitvraag.publiceerEvents(Store, A.data, [A.event(e.id)]);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
         A.toast(`${e.naam} verstuurd – ${n} melding(en)`, 'ok');
+      });
+      const et = bg.querySelector('#eTerug');
+      if (et) et.onclick = () => A.bezig(et, async () => {
+        const ev0 = A.event(e.id), vandaag = G.today();
+        if (vandaag >= G.addDays(ev0.datum, -1)) return A.toast('Dit feest is te dichtbij om de uitvraag weer te openen. Pas de indeling aan via het rooster.', 'fout');
+        let tot = ev0.uitvraag_tot && ev0.uitvraag_tot >= vandaag ? ev0.uitvraag_tot : Uitvraag.standaardTermijn(ev0.datum, dagenUit, vandaag);
+        if (!tot || tot < vandaag) tot = vandaag;
+        if (tot >= G.addDays(ev0.datum, -1)) tot = G.addDays(ev0.datum, -2) >= vandaag ? G.addDays(ev0.datum, -2) : vandaag;
+        const ds = A.data.diensten.filter(x => x.event_id === ev0.id), mensen = ds.filter(x => x.medewerker_id);
+        const verstuurd = ev0.status === 'ingepland';
+        if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${ev0.naam} vervalt${verstuurd && mensen.length ? ` en ${mensen.length} ${mensen.length === 1 ? 'persoon krijgt' : 'mensen krijgen'} daar een melding van` : ''}. De uitvraag gaat weer open t/m ${A.datumLang(tot)}. Wie al heeft gereageerd, hoeft dat niet opnieuw te doen.`, 'Ongedaan maken')) return;
+        for (const x of ds) {
+          await Store.remove('diensten', x.id);
+          if (verstuurd && x.medewerker_id) await A.melding(x.medewerker_id, `↩ De indeling van ${ev0.naam} (${A.datumLang(ev0.datum)}) is teruggedraaid. Je dienst staat nog niet vast; de uitvraag loopt weer t/m ${A.datumLang(tot)}. Je reactie blijft staan.`);
+        }
+        await Store.update('zalen_events', ev0.id, { status: 'open', uitvraag: true, uitvraag_tot: tot, herinnerd: false });
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
+        A.toast(ev0.naam + ': uitvraag staat weer open', 'ok');
       });
       const np = bg.querySelector('#eNuPlannen');
       if (np) np.onclick = () => A.bezig(np, async () => {
