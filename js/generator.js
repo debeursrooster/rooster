@@ -492,12 +492,24 @@
   };
 
   // Uitvraag afsluiten: alle feesten in één keer verdelen (eerlijk over de datums heen)
-  G.planEvents = function (events, data) {
+  G.planEvents = function (events, data, opties) {
     const ids = new Set(events.map(e => e.id));
     const slots = [];
     for (const e of events) slots.push(...G.eventSlots(e));
     const bestaande = (data.diensten || []).filter(d => !ids.has(d.event_id));
-    return G.plan(slots, data, bestaande, { geenUrencheck: true });
+    return G.plan(slots, data, bestaande, { geenUrencheck: true, ...(opties || {}) });
+  };
+
+  // Voorlopige indeling van feesten waarvan de uitvraag nog loopt, met de reacties die er nu zijn.
+  // Wordt niet opgeslagen: alleen om te laten zien hoe het er nu voor staat.
+  G.voorlopig = function (data) {
+    const nu = G.today();
+    const lopend = (data.zalen_events || []).filter(e => e.status === 'open' && e.datum >= nu);
+    if (!lopend.length) return { diensten: [], perEvent: {} };
+    const res = G.planEvents(lopend, data, { tijd: 400, iteraties: 30000 });
+    const perEvent = {};
+    for (const d of res.diensten) { d.voorlopig = true; (perEvent[d.event_id] = perEvent[d.event_id] || []).push(d); }
+    return { diensten: res.diensten, perEvent };
   };
 
   // Eén vervanger zoeken voor een dienst (bij goedgekeurd verlof)

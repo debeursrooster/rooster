@@ -69,6 +69,15 @@
     window.scrollTo(0, 0);
   }
   async function herlaad() { await A.reload(); updateTellers(); }
+  // Voorlopige indeling van lopende uitvragen (wordt opnieuw berekend zodra de gegevens veranderen)
+  let vlCache = { sleutel: null, res: null };
+  function voorlopig() {
+    const d = A.data;
+    const sleutel = [d.event_reacties.length, d.diensten.length, d.zalen_events.map(e => e.id + e.status + e.datum + JSON.stringify(e.bezetting || [])).join(), d.medewerkers.length, d.verlof.length, d.beschikbaarheid.length].join('|');
+    if (vlCache.data !== d || vlCache.sleutel !== sleutel) vlCache = { data: d, sleutel, res: G.voorlopig(d) };
+    return vlCache.res;
+  }
+  const vlOpen = (vanaf, maand) => voorlopig().diensten.filter(x => !x.medewerker_id && x.datum >= (vanaf || '') && (!maand || x.datum.startsWith(maand)));
   function opnieuw() { (PAGINAS[(location.hash || '#overzicht').slice(1).split('/')[0]] || PAGINAS.overzicht)(); updateTellers(); }
 
   function updateTellers() {
@@ -101,6 +110,7 @@
     const verlofOpen = d.verlof.filter(v => v.status === 'aangevraagd');
     const ruilOpen = d.ruilverzoeken.filter(r => r.status === 'overgenomen');
     const openDiensten = d.diensten.filter(x => !x.medewerker_id && x.datum >= nu);
+    const vlOpenNu = vlOpen(nu);
     const rv = A.rooster(volgende);
     const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
     let roosterTekst, roosterSub;
@@ -126,7 +136,7 @@
       <div class="tegels">
         <div class="tegel klik ${verlofOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/verlof"><div class="getal">${verlofOpen.length}</div><div class="wat">vrij-aanvragen</div></div>
         <div class="tegel klik ${ruilOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/ruil"><div class="getal">${ruilOpen.length}</div><div class="wat">ruilingen goed te keuren</div></div>
-        <div class="tegel klik ${openDiensten.length ? 'aandacht' : ''}" data-ga="rooster"><div class="getal">${openDiensten.length}</div><div class="wat">open diensten</div></div>
+        <div class="tegel klik ${openDiensten.length + vlOpenNu.length ? 'aandacht' : ''}" data-ga="rooster"><div class="getal">${openDiensten.length + vlOpenNu.length}</div><div class="wat">open diensten${vlOpenNu.length ? `<br><small>waarvan ${vlOpenNu.length} bij feesten met lopende uitvraag</small>` : ''}</div></div>
         <div class="tegel klik" data-ga="rooster" data-maand="${volgende}"><div class="getal" style="font-size:1.4rem">${roosterTekst}</div><div class="wat">rooster ${esc(A.maandNaam(volgende))}<br><small>${roosterSub}</small></div></div>
       </div>
       <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
@@ -134,7 +144,7 @@
           ${vandaag.length ? vandaag.map(x => { const m = A.mw(x.medewerker_id); return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')}</div><div class="meta">${tijd(x)} · ${esc(x.functie)}</div></div><div class="rechts">${locLabel(x.locatie)}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">☕</span>Vandaag niemand ingepland</div>'}
         </div>
         <div class="paneel"><div class="paneel-kop"><h3>Komende feesten</h3><a class="knop klein" href="#zalen">Agenda</a></div>
-          ${feesten.length ? feesten.map(e => { const ds = d.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; return `<div class="item"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div><div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten ${e.zaal ? '· ' + esc(e.zaal) : ''}</div></div><div class="rechts">${e.status === 'open' ? uitvraagLabel(e) : e.status === 'concept' ? '<span class="label let">te controleren</span>' : !ds.length ? '<span class="label">nog niet ingeroosterd</span>' : open ? `<span class="label fout">${open} open</span>` : `<span class="label ok">${ds.length} mensen</span>`}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen feesten in de komende 3 weken</div>'}
+          ${feesten.length ? feesten.map(e => { const ds = d.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; return `<div class="item"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div><div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten ${e.zaal ? '· ' + esc(e.zaal) : ''}</div></div><div class="rechts">${e.status === 'open' ? uitvraagLabel(e) + vlLabel(e) : e.status === 'concept' ? '<span class="label let">te controleren</span>' : !ds.length ? '<span class="label">nog niet ingeroosterd</span>' : open ? `<span class="label fout">${open} open</span>` : `<span class="label ok">${ds.length} mensen</span>`}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen feesten in de komende 3 weken</div>'}
         </div>
         <div class="paneel melding-lijst"><div class="paneel-kop"><h3>Meldingen</h3>${meldingen.some(m => !m.gelezen) ? '<button class="knop klein" id="allesGelezen">Alles gelezen</button>' : ''}</div>
           ${meldingen.length ? meldingen.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}
@@ -169,17 +179,19 @@
     const maand = staat.maand, r = A.rooster(maand);
     const diensten = d.diensten.filter(x => x.maand === maand && (staat.loc === 'alle' || x.locatie === staat.loc));
     const open = diensten.filter(x => !x.medewerker_id).length;
+    const vlo = staat.loc === 'cafetaria' ? 0 : vlOpen('', maand).length;
+    const vlZin = vlo ? ` <b class="fout-tekst">Feesten met lopende uitvraag: voorlopig ${vlo} open.</b>` : '';
 
     let status;
     if (!r) {
       const gd = G.generatieDatum(maand, d.instellingen.dagen_voor_einde);
-      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}</div>
+      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
         <div class="acties"><button class="knop primair" id="maakRooster">✨ Rooster nu maken</button></div></div>`;
     } else if (r.status === 'concept') {
-      status = `<div class="statusbalk concept">📝 <div><b>Concept</b> – controleer het rooster; het personeel ziet het pas na versturen. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle diensten zijn ingevuld.'}</div>
+      status = `<div class="statusbalk concept">📝 <div><b>Concept</b> – controleer het rooster; het personeel ziet het pas na versturen. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
         <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
     } else {
-      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}</div>
+      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${vlZin}</div>
         <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terug naar concept</button></div></div>`;
     }
 
@@ -261,7 +273,9 @@
     const dicht = new Map(d.sluitingsdagen.map(s => [s.datum, s.reden]));
     const eerste = maand + '-01', laatste = G.lastDay(maand);
     let w = G.weekStart(eerste);
-    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
+    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span><i class="voorlopig-i"></i>Voorlopig (uitvraag loopt nog)</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
+    const vlPerDag = {};
+    if (staat.loc !== 'cafetaria') for (const x of voorlopig().diensten) (vlPerDag[x.datum] = vlPerDag[x.datum] || []).push(x);
     const heeftRooster = !!A.rooster(maand);
     while (w <= laatste) {
       html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen">`;
@@ -275,7 +289,10 @@
         html += `<div class="dag ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
           <div class="dag-kop"><span>${A.DAG_KORT[i]}</span><span class="nr">${G.parse(dag).getUTCDate()}</span></div>
           ${isDicht && staat.loc !== 'zalen' ? `<span class="label">Cafetaria dicht${dicht.get(dag) ? ' · ' + esc(dicht.get(dag)) : ''}</span>` : ''}
-          ${evs.map(e => `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>`).join('')}
+          ${evs.map(e => { const vl = (vlPerDag[dag] || []).filter(x => x.event_id === e.id), vo = vl.filter(x => !x.medewerker_id).length;
+            return `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>${vl.length ? `<div class="vl-kop ${vo ? 'fout' : 'ok'}" data-ev="${e.id}">⏳ voorlopig · ${vo ? vo + ' open' : 'rond'}</div>` : ''}` +
+              vl.sort((a, b) => !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start)).map(x => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – uitvraag loopt nog">
+                ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${esc(m ? m.naam : 'Open')}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join(''); }).join('')}
           ${ds.map(x => { const m = A.mw(x.medewerker_id); return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}">
             ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${esc(m ? m.naam : 'Open')}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
           ${heeftRooster ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}
@@ -285,7 +302,7 @@
       w = G.addDays(w, 7);
     }
     el.innerHTML = html;
-    el.querySelectorAll('.dienst').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
+    el.querySelectorAll('.dienst:not(.voorlopig)').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
     el.querySelectorAll('[data-plus]').forEach(x => x.onclick = () => dienstModal(null, x.dataset.plus));
     el.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
   }
@@ -658,6 +675,10 @@
     const kan = reac.filter(r => r.kan).length, kanNiet = reac.filter(r => !r.kan).length;
     return { groep, reac, kan, kanNiet, geen: groep.filter(m => !reac.some(r => r.medewerker_id === m.id)).length };
   }
+  function vlLabel(e) {
+    const ds = voorlopig().perEvent[e.id] || [], open = ds.filter(x => !x.medewerker_id).length;
+    return ds.length ? (open ? ` <span class="label fout">voorlopig ${open} open</span>` : ' <span class="label ok">voorlopig rond</span>') : '';
+  }
   function uitvraagLabel(e) {
     if (e.status !== 'open') return '';
     const st = uitvraagStand(e);
@@ -671,20 +692,23 @@
     const nietMw = st.reac.filter(r => !r.kan).map(r => A.mw(r.medewerker_id)).filter(Boolean);
     const wachtMw = st.groep.filter(m => !st.reac.some(r => r.medewerker_id === m.id));
     // per functie: hoeveel van de 'kan'-mensen kunnen die functie doen
-    const perFn = (e.bezetting || []).filter(b => +b.aantal > 0).map(b => ({ f: b.functie, nodig: +b.aantal, kan: kanMw.filter(m => (m.functies || []).includes(b.functie)).length }));
-    const fnTekort = perFn.some(x => x.kan < x.nodig);
-    const toestand = nodig && st.kan >= nodig && !fnTekort ? 'goed' : st.kan > 0 ? 'bijna' : wachtMw.length ? 'wacht' : 'slecht';
+    // Voorlopige indeling met de reacties van nu (vast personeel telt ook mee)
+    const vl = voorlopig().perEvent[e.id] || [];
+    const gevuld = vl.filter(x => x.medewerker_id).length, nogOpen = Math.max(0, nodig - gevuld);
+    const perFn = (e.bezetting || []).filter(b => +b.aantal > 0).map(b => ({ f: b.functie, nodig: +b.aantal, kan: vl.filter(x => x.functie === b.functie && x.medewerker_id).length }));
+    const toestand = nodig && !nogOpen ? 'goed' : gevuld > 0 ? 'bijna' : wachtMw.length ? 'wacht' : 'slecht';
     const kleur = { goed: 'var(--ok)', bijna: 'var(--let)', wacht: '#b3a898', slecht: 'var(--fout)' }[toestand];
-    const titel = { goed: '✓ Genoeg mensen', bijna: 'Nog ' + Math.max(nodig - st.kan, perFn.reduce((s, x) => s + Math.max(0, x.nodig - x.kan), 0)) + ' nodig', wacht: 'Wacht op reacties', slecht: 'Niemand kan' }[toestand];
-    const pct = nodig ? Math.min(100, Math.round(st.kan / nodig * 100)) : 0;
+    const titel = { goed: '✓ Voorlopig rond', bijna: 'Voorlopig nog ' + nogOpen + ' open', wacht: 'Wacht op reacties · ' + nogOpen + ' open', slecht: 'Niemand kan · ' + nogOpen + ' open' }[toestand];
+    const pct = nodig ? Math.min(100, Math.round(gevuld / nodig * 100)) : 0;
+    const vlTekst = vl.length ? `<div class="uv-voorlopig"><b>Voorlopig:</b> ${vl.slice().sort((a, b) => !a.medewerker_id - !b.medewerker_id || a.functie.localeCompare(b.functie)).map(x => x.medewerker_id ? `${esc((A.mw(x.medewerker_id) || {}).naam || '?')} <small>(${esc(x.functie)})</small>` : `<span class="fout">open (${esc(x.functie)})</span>`).join(', ')}</div>` : '';
     const namen = (lijst, cls, teken) => lijst.length ? `<span class="uv-namen ${cls}">${teken} ${lijst.map(m => esc(m.naam)).join(', ')}</span>` : '';
     return {
       toestand,
       meta: `<div class="uv-fns">${perFn.map(x => `<span class="uv-fn ${x.kan >= x.nodig ? 'ok' : x.kan ? 'let' : 'fout'}">${esc(x.f)} <b>${x.kan}/${x.nodig}</b></span>`).join('')}</div>
-        <div class="uv-wie">${namen(kanMw, 'ok', '✓')}${namen(nietMw, 'fout', '✕')}${namen(wachtMw, 'wacht', '…')}</div>`,
+        <div class="uv-wie">${namen(kanMw, 'ok', '✓')}${namen(nietMw, 'fout', '✕')}${namen(wachtMw, 'wacht', '…')}</div>${vlTekst}`,
       rechts: `<div class="uv-blok ${toestand}">
         <div class="uv-titel" style="color:${kleur}">${titel}</div>
-        <div class="uv-balk" title="${st.kan} van ${nodig} nodig"><i style="width:${pct}%;background:${kleur}"></i></div>
+        <div class="uv-balk" title="voorlopig ${gevuld} van ${nodig} ingevuld"><i style="width:${pct}%;background:${kleur}"></i></div>
         <div class="uv-tel"><span class="ok">✓ ${st.kan} kan</span><span class="fout">✕ ${st.kanNiet} niet</span><span class="wacht">… ${st.geen} wacht</span></div>
         <div class="uv-tot">⏳ reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>`
     };
