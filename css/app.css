@@ -374,3 +374,24 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .schuif input:checked ~ .schuif-tekst { color: var(--ok); }
 /* 5 knoppen in de onderbalk: tekst op één regel houden */
 .onderbalk button { white-space: nowrap; font-size: clamp(.6rem, 2.85vw, .72rem); padding-left: 0; padding-right: 0; min-width: 0; }
+
+/* ---------- personeel: maandoverzicht rooster ---------- */
+.mk { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.mk-kop { text-align: center; font-size: .72rem; font-weight: 700; color: var(--zacht); text-transform: uppercase; padding: .2em 0 .3em; }
+.mk-dag { font: inherit; border: 0; background: #faf6ef; border-radius: 10px; min-height: 58px; padding: .3em .15em; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; color: var(--inkt); -webkit-tap-highlight-color: transparent; }
+.mk-dag.leeg { background: transparent; cursor: default; }
+.mk-dag.voorbij { opacity: .5; }
+.mk-dag .nr { font-weight: 700; font-size: .95rem; width: 1.9em; height: 1.9em; line-height: 1.9em; border-radius: 50%; text-align: center; }
+.mk-dag.vandaag .nr { background: var(--accent); color: #fff; }
+.mk-dag.vandaag { box-shadow: inset 0 0 0 2px var(--accent); }
+.mk-dag.werk { background: var(--accent-licht); }
+.mk-tijd { font-size: .62rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.mk-tijd.grijs { color: #c4bbb0; }
+.mk-stippen { display: flex; gap: 3px; min-height: 6px; }
+.mk-stippen i, .mk-legenda i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.st-ev { background: var(--zaal); } .st-open { background: var(--fout); } .st-dicht { background: #9a8f80; }
+.mk-legenda .st-werk { background: var(--accent); width: 10px; height: 10px; border-radius: 3px; }
+.mk-legenda { display: flex; flex-wrap: wrap; justify-content: center; gap: .3em 1em; font-size: .75rem; color: var(--zacht); margin-top: .7em; }
+.mk-legenda span { display: inline-flex; align-items: center; gap: .35em; }
+/* beheer: aantal samengevoegde open plekken */
+.dienst .aantal { display: inline-block; background: var(--fout); color: #fff; border-radius: 99px; font-size: .68rem; padding: 0 .45em; margin-left: .2em; font-style: normal; }
