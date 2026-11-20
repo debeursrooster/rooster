@@ -359,9 +359,9 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .uv-voorlopig .fout, .fout-tekst { color: var(--fout); }
 
 /* ---------- personeel: mijn / beschikbare diensten ---------- */
-.item.onbevestigd .wie, .item.onbevestigd .meta { color: #a59a8c; }
-.item.onbevestigd .wie .label { opacity: .6; }
-.item.onbevestigd .datumblok { opacity: .55; }
+.item.onbevestigd .wie, .item.onbevestigd .meta { color: #c4bbb0; }
+.item.onbevestigd .wie .label { opacity: .45; }
+.item.onbevestigd .datumblok { opacity: .4; }
 .schuif { display: inline-flex; align-items: center; gap: .55em; cursor: pointer; margin-left: auto; user-select: none; -webkit-tap-highlight-color: transparent; }
 .schuif input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .schuif .baan { position: relative; width: 58px; height: 32px; border-radius: 999px; background: #c9c3bb; box-shadow: inset 0 2px 4px rgba(0,0,0,.18); transition: background .2s; flex: none; }
