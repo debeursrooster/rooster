@@ -1140,6 +1140,19 @@
     hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => mwModal(A.mw(r.dataset.mw)));
   }
 
+
+  // Opslaan; bestaat de kolom liever_niet_dagen nog niet in Supabase, dan zonder die kolom
+  async function mwOpslaan(id, rij) {
+    const doe = r => id ? Store.update('medewerkers', id, r) : Store.insert('medewerkers', r);
+    try { return await doe(rij); }
+    catch (x) {
+      if (!/liever_niet_dagen/.test(x.message)) throw x;
+      const r = { ...rij }; delete r.liever_niet_dagen;
+      A.toast('Opgeslagen, behalve "liever niet": voer eerst 4-planner.sql uit in Supabase', 'fout');
+      return await doe(r);
+    }
+  }
+
   async function mwModal(m) {
     const nieuw = !m;
     const kleuren = ['#e07a2f', '#2f7ae0', '#c0398a', '#2e9e6a', '#8a5cd6', '#d6a01e', '#1ea7b8', '#d64545', '#4b7f2a', '#7a6a58'];
@@ -1154,6 +1167,7 @@
       <div class="rij"><div class="veld"><label>Contracturen per week <small>(0 = oproepkracht)</small></label><input type="number" min="0" step="0.5" id="mUren" value="${esc(m.contracturen)}"></div>
         <div class="veld"><label>Max. dagen per week</label><input type="number" min="1" max="7" id="mMax" value="${esc(m.max_dagen_week || 5)}"></div></div>
       <div class="veld"><label>Vaste werkdagen <small>(krijgt voorrang op deze dagen)</small></label>${chips('vast', dagOpties, m.vaste_dagen)}</div>
+      <div class="veld"><label>Liever niet op <small>(alleen als het echt nodig is)</small></label>${chips('liever', dagOpties, m.liever_niet_dagen)}</div>
       <div class="veld"><label>Kan nooit op <small>(wordt dan nooit ingepland)</small></label>${chips('vrij', dagOpties, m.vrije_dagen, true)}</div>
       <div class="rij"><div class="veld"><label>Kleur in rooster</label><input type="color" id="mKleur" value="${esc(m.kleur)}" style="height:40px;padding:2px"></div>
         <div class="veld"><label>&nbsp;</label><label class="check"><input type="checkbox" id="mActief" ${m.actief !== false ? 'checked' : ''}> In dienst</label></div></div>
@@ -1172,7 +1186,7 @@
       },
       waarde: bg => {
         const val = n => [...bg.querySelectorAll(`input[name=${n}]:checked`)].map(i => i.value);
-        return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, notitie: bg.querySelector('#mNot').value };
+        return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), liever_niet_dagen: val('liever').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, notitie: bg.querySelector('#mNot').value };
       }
     });
     const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen);
@@ -1183,11 +1197,11 @@
       for (const x of toekomst) await Store.update('diensten', x.id, { medewerker_id: null });
       await Store.remove('medewerkers', m.id);
     } else if (nieuw) {
-      await Store.insert('medewerkers', res);
+      await mwOpslaan(null, res);
       A.modal('Medewerker toegevoegd', `<p><b>${esc(res.naam)}</b> kan nu inloggen op de personeelspagina met PIN <b>${esc(res.pin)}</b>.</p><p class="zacht">Stuur de link en de code even door:</p>`,
         [{ label: 'Sluiten', waarde: null }, { label: '💬 Via WhatsApp sturen', soort: 'ok', waarde: () => { window.open(`https://wa.me/${(res.telefoon || '').replace(/\D/g, '').replace(/^0/, '31')}?text=` + encodeURIComponent(`Hoi ${res.naam}! Vanaf nu staat het rooster online: ${siteUrl()}\nJe inlogcode is ${res.pin}`), '_blank'); } }]);
     } else {
-      await Store.update('medewerkers', m.id, res);
+      await mwOpslaan(m.id, res);
       if (m.actief !== false && res.actief === false) {
         const toekomst = A.data.diensten.filter(x => x.medewerker_id === m.id && x.datum >= G.today());
         if (toekomst.length && await A.bevestig('Toekomstige diensten', `${m.naam} staat nog ${toekomst.length}× ingepland. Die diensten open zetten?`, 'Open zetten'))
@@ -1296,6 +1310,25 @@
       <button class="icoon rWeg" type="button" title="Verwijderen">✕</button></div>`;
   const leesRegels = () => [...hoofd.querySelectorAll('.regel-rij')].map(r => ({ functie: r.querySelector('.rFn').value, per: +r.querySelector('.rPer').value || 0, min: +r.querySelector('.rMin').value || 0, max: +r.querySelector('.rMax').value || 0 })).filter(r => r.functie && (r.per || r.min));
 
+  // ---------- slim plannen ----------
+  const GEWICHT_OPTIES = [[0, 'Uit'], [0.5, 'Minder belangrijk'], [1, 'Normaal'], [2, 'Belangrijk'], [4, 'Heel belangrijk']];
+  function plannerPaneel(s) {
+    const P = G.plannerInst({ instellingen: s });
+    const sel = (k, w) => `<select data-gewicht="${k}">${GEWICHT_OPTIES.map(([v, l]) => `<option value="${v}" ${+w === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    return `<div class="paneel"><h3>🧠 Slim plannen</h3>
+      <p class="zacht" style="font-size:.9rem">De planner probeert duizenden roosters en kiest het rooster dat het best scoort op de punten hieronder.
+        Wat nooit mag (verkeerde functie, vrij, ziek, "kan niet", al aan het werk, max. dagen per week) gebeurt nooit, wat je hier ook kiest.</p>
+      <div class="rij"><div class="veld"><label>Liefst niet meer dan … dagen achter elkaar</label><input type="number" min="2" max="14" id="iReeks" value="${esc(P.max_achter_elkaar)}"></div>
+        <div class="veld"><label>Minimaal … uur rust tussen twee diensten</label><input type="number" min="0" max="24" step="0.5" id="iRust" value="${esc(P.min_rust)}"></div></div>
+      <div class="planner-punten">${G.PLANNER_PUNTEN.map(([k, l]) => `<div class="planner-punt"><span>${esc(l)}</span>${sel(k, P.w[k])}</div>`).join('')}</div>
+      <button class="knop klein" type="button" id="iPlannerStd" style="margin-top:.8em">Alles op normaal</button></div>`;
+  }
+  function leesPlanner() {
+    const gewichten = {};
+    hoofd.querySelectorAll('[data-gewicht]').forEach(x => gewichten[x.dataset.gewicht] = +x.value);
+    return { max_achter_elkaar: +$('#iReeks').value || 5, min_rust: $('#iRust').value === '' ? 11 : +$('#iRust').value, gewichten };
+  }
+
   function pInstellingen() {
     const s = A.data.instellingen;
     hoofd.innerHTML = `<div class="kop"><h1>Instellingen</h1></div>
@@ -1314,6 +1347,7 @@
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
         <label class="check"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
         <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+      ${plannerPaneel(s)}
       <div class="paneel"><h3>🎉 Standaard bezetting feesten</h3>
         <p class="zacht" style="font-size:.9rem">Hiermee wordt bij een nieuw feest voorgesteld hoeveel mensen er nodig zijn. Per feest kun je het daarna altijd nog aanpassen.
           Laat "1 per … gasten" op <b>0</b> staan voor een vast aantal.</p>
@@ -1336,16 +1370,23 @@
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim() };
-      try { await Store.update('instellingen', 1, wijz); }
-      catch (x) {
-        if (!/bezetting_regels/.test(x.message)) throw x;
-        delete wijz.bezetting_regels; await Store.update('instellingen', 1, wijz);
-        A.toast('Opgeslagen, behalve de standaard bezetting: voer eerst bezetting.sql uit in Supabase', 'fout');
+      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
+      // Kolommen die nog niet in Supabase bestaan overslaan, met uitleg welk SQL-bestand nodig is
+      const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'] };
+      const gemist = [];
+      for (let poging = 0; ; poging++) {
+        try { await Store.update('instellingen', 1, wijz); break; }
+        catch (x) {
+          const k = Object.keys(nodig).find(k => k in wijz && new RegExp(k).test(x.message));
+          if (!k || poging > 3) throw x;
+          delete wijz[k]; gemist.push(nodig[k]);
+        }
       }
+      if (gemist.length) A.toast('Opgeslagen, behalve ' + gemist.map(g => g[0]).join(' en ') + ': voer eerst ' + gemist.map(g => g[1]).join(' en ') + ' uit in Supabase', 'fout');
       await herlaad(); $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam; A.toast('Instellingen opgeslagen', 'ok'); pInstellingen();
     });
     Push.paneel($('#iPush'), { rol: 'beheer', onTest: testBeheer });
+    $('#iPlannerStd').onclick = () => { hoofd.querySelectorAll('[data-gewicht]').forEach(x => x.value = '1'); $('#iReeks').value = 5; $('#iRust').value = 11; };
     // standaard bezetting
     const vbRegels = () => {
       const r = leesRegels(), fnsAan = A.data.instellingen.functies || [];

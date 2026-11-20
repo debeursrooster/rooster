@@ -1,8 +1,10 @@
 // =====================================================================
 //  Roostergenerator – werkt in de browser én in Node (GitHub Actions)
-//  Houdt rekening met: functies, locaties, contracturen, vaste dagen,
-//  vaste vrije dagen, goedgekeurd verlof, opgegeven onbeschikbaarheid,
-//  max. dagen per week, sluitingsdagen en dubbele diensten.
+//  Harde regels (nooit): verkeerde functie/locatie, vaste vrije dag,
+//  goedgekeurd verlof, ziek, opgegeven 'kan niet', al aan het werk,
+//  max. dagen per week, sluitingsdagen.
+//  Daarna weegt de planner een reeks punten (zie G.PLANNER_PUNTEN) en
+//  zoekt hij het rooster met de laagste 'kosten'.
 // =====================================================================
 (function (root) {
   const G = {};
@@ -84,6 +86,31 @@
     return (data.medewerkers || []).filter(m => m.actief !== false && G.isOproep(m) && (m.locaties || []).includes('zalen') && (m.functies || []).some(f => fns.has(f)));
   };
 
+  // ---------- instellingen van de planner ----------
+  // Gewicht per punt: 0 = uit, 0.5 = minder belangrijk, 1 = normaal, 2 = belangrijk, 4 = heel belangrijk
+  G.PLANNER_PUNTEN = [
+    ['uren', 'Iedereen zo dicht mogelijk bij de contracturen'],
+    ['vaste_dag', 'Vaste werkdagen aanhouden'],
+    ['oproep', 'Oproepkrachten alleen als het nodig is, en eerlijk verdeeld'],
+    ['verlof', 'Wie vrij heeft aangevraagd (nog niet goedgekeurd) ontzien'],
+    ['liever_niet', '"Liever niet"-dagen ontzien'],
+    ['rust', 'Genoeg rust tussen twee diensten'],
+    ['reeks', 'Niet te veel dagen achter elkaar'],
+    ['weekend', 'Weekenddiensten (za/zo) eerlijk verdelen'],
+    ['laat', 'Late diensten (na 22:00) eerlijk verdelen'],
+    ['wisselend', 'Zelfde begintijden binnen een week']
+  ];
+  G.plannerInst = function (data) {
+    const p = (data && data.instellingen && data.instellingen.planner) || {};
+    const w = {};
+    for (const [k] of G.PLANNER_PUNTEN) w[k] = (p.gewichten && p.gewichten[k] != null && p.gewichten[k] !== '') ? +p.gewichten[k] : 1;
+    return {
+      max_achter_elkaar: +p.max_achter_elkaar || 5,
+      min_rust: (p.min_rust != null && p.min_rust !== '') ? +p.min_rust : 11,
+      w
+    };
+  };
+
   // ---------- beschikbaarheid ----------
   function onbeschikbaarDeel(deel, slot) {
     if (!deel || deel === 'hele dag') return true;
@@ -95,7 +122,7 @@
 
   // Context opbouwen zodat de controle snel gaat
   G.context = function (data, bestaande) {
-    const ctx = { data, perMw: {} };
+    const ctx = { data, perMw: {}, alle: bestaande || [], cache: {} };
     for (const m of data.medewerkers || []) ctx.perMw[m.id] = { diensten: [], uren: {}, dagenWeek: {} };
     for (const d of bestaande || []) G.registreer(ctx, d);
     ctx.verlof = (data.verlof || []).filter(v => v.status !== 'afgewezen');
@@ -106,6 +133,7 @@
     for (const r of data.event_reacties || []) (ctx.reacties[r.event_id] = ctx.reacties[r.event_id] || {})[r.medewerker_id] = r.kan;
     ctx.vandaag = G.today();
     ctx.ziek = (data.ziekmeldingen || []).filter(z => z.status !== 'afgewezen');
+    ctx.P = G.plannerInst(data);
     return ctx;
   };
 
@@ -122,64 +150,199 @@
 
   G.doelUren = (m, maand) => (+m.contracturen || 0) * G.daysInMonth(maand) / 7;
 
-  // Geeft {ok, score, redenen[]} terug
-  // opties.negeerUitvraag: bij zelf oppakken van een open dienst hoeft een oproepkracht niet vooraf 'kan' te hebben gezegd
-  G.beoordeel = function (ctx, m, slot, opties) {
-    const redenen = [];
+  // ---------- tijden van een dienst (in minuten vanaf 1970), gecachet ----------
+  const tijdCache = new WeakMap();
+  const dagNr = s => Math.round(G.parse(s) / 864e5);
+  function tijd(d) {
+    let t = tijdCache.get(d);
+    if (t && t.k === d.datum + d.start + d.eind) return t;
+    const dag = dagNr(d.datum), a = dag * 1440 + G.min(d.start);
+    let b = dag * 1440 + G.min(d.eind); if (b <= a) b += 1440;
+    const wd = G.weekday(d.datum);
+    t = { k: d.datum + d.start + d.eind, dag, a, b, uren: (b - a) / 60, maand: G.monthOf(d.datum), week: G.weekStart(d.datum), wd,
+      weekend: wd >= 5, laat: b > dag * 1440 + 22 * 60 };
+    tijdCache.set(d, t);
+    return t;
+  }
+  G.tijd = tijd;
+
+  // ---------- harde regels die niet van de rest van het rooster afhangen ----------
+  function vastOk(ctx, m, slot, opties) {
     opties = opties || {};
-    if (m.actief === false) return { ok: false, redenen: ['niet actief'] };
-    if (!(m.functies || []).includes(slot.functie)) return { ok: false, redenen: ['heeft functie ' + slot.functie + ' niet'] };
-    if (!(m.locaties || []).includes(slot.locatie)) return { ok: false, redenen: ['werkt niet in ' + slot.locatie] };
+    if (m.actief === false) return { ok: false, reden: 'niet actief' };
+    if (!(m.functies || []).includes(slot.functie)) return { ok: false, reden: 'heeft functie ' + slot.functie + ' niet' };
+    if (!(m.locaties || []).includes(slot.locatie)) return { ok: false, reden: 'werkt niet in ' + slot.locatie };
     const wd = G.weekday(slot.datum);
-    if ((m.vrije_dagen || []).map(Number).includes(wd)) return { ok: false, redenen: ['vaste vrije dag'] };
-    const vl = ctx.verlof.find(v => v.medewerker_id === m.id && v.van <= slot.datum && v.tot >= slot.datum);
-    if (vl && vl.status === 'goedgekeurd') return { ok: false, redenen: ['vrij (goedgekeurd)'] };
-    if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && (!z.tot || z.tot >= slot.datum))) return { ok: false, redenen: ['ziek gemeld'] };
+    if ((m.vrije_dagen || []).map(Number).includes(wd)) return { ok: false, reden: 'vaste vrije dag' };
+    const vl = ctx.verlof.find(v => v.medewerker_id === m.id && v.van <= slot.datum && v.tot >= slot.datum && v.status === 'goedgekeurd');
+    if (vl) return { ok: false, reden: 'vrij (goedgekeurd)' };
+    if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && (!z.tot || z.tot >= slot.datum))) return { ok: false, reden: 'ziek gemeld' };
     const ob = ctx.onbeschikbaar.find(b => b.medewerker_id === m.id && b.datum === slot.datum && onbeschikbaarDeel(b.deel, slot));
-    if (ob) return { ok: false, redenen: ['heeft aangegeven niet te kunnen'] };
-    // Uitvraag zalencentrum
+    if (ob) return { ok: false, reden: 'heeft aangegeven niet te kunnen' };
     const ev = slot.event_id && ctx.events[slot.event_id];
     let reactieKan = false;
     if (ev && ev.uitvraag) {
       const r = (ctx.reacties[ev.id] || {})[m.id];
-      if (r === false) return { ok: false, redenen: ['heeft gezegd niet te kunnen'] };
-      if (G.isOproep(m) && r !== true && !opties.negeerUitvraag) return { ok: false, redenen: [r === undefined ? 'heeft niet gereageerd' : 'niet beschikbaar'] };
+      if (r === false) return { ok: false, reden: 'heeft gezegd niet te kunnen' };
+      if (G.isOproep(m) && r !== true && !opties.negeerUitvraag) return { ok: false, reden: r === undefined ? 'heeft niet gereageerd' : 'niet beschikbaar' };
       reactieKan = r === true;
     }
-    const p = ctx.perMw[m.id] || { diensten: [], uren: {}, dagenWeek: {} };
-    if (p.diensten.some(d => d !== slot && d.id !== slot.id && G.overlap(d, slot))) return { ok: false, redenen: ['werkt dan al'] };
-    const wk = G.weekStart(slot.datum);
-    const dagen = p.dagenWeek[wk] || new Set();
-    if (!dagen.has(slot.datum) && dagen.size >= (+m.max_dagen_week || 7)) return { ok: false, redenen: ['max. dagen per week bereikt'] };
+    return { ok: true, reactieKan };
+  }
+  G.vastOk = vastOk;
 
-    // Score (hoger = beter)
-    const maand = G.monthOf(slot.datum);
-    const doel = G.doelUren(m, maand);
-    const gepland = p.uren[maand] || 0;
-    const uren = G.hours(slot.start, slot.eind);
-    let score = 0;
-    if (doel > 0) {
-      const tekort = doel - gepland;
-      score += Math.max(-60, Math.min(60, tekort * 1.5));            // wie nog uren tekort heeft eerst
-      if (gepland + uren > doel * 1.1) { score -= 70; redenen.push('komt boven contracturen'); }
+  // ---------- harde regels die wel van de rest afhangen: overlap en max. dagen per week ----------
+  function pastErbij(m, slot, lijst) {
+    const t = tijd(slot);
+    let zelfdeDag = false;
+    const dagen = new Set();
+    for (const d of lijst) {
+      if (d === slot || (slot.id && d.id === slot.id)) continue;
+      const u = tijd(d);
+      if (u.a < t.b && t.a < u.b) return 'werkt dan al';
+      if (u.week === t.week) { dagen.add(d.datum); if (d.datum === slot.datum) zelfdeDag = true; }
+    }
+    if (!zelfdeDag && dagen.size >= (+m.max_dagen_week || 7)) return 'max. dagen per week bereikt';
+    return null;
+  }
+
+  // Welk deel van de diensten waarvoor iemand in aanmerking komt, valt in het weekend / is laat?
+  // Zo wordt iemand die alleen in het weekend kan niet 'gestraft'.
+  function verwachting(ctx, m, maanden) {
+    const key = 'v' + m.id + maanden.join();
+    if (ctx.cache[key]) return ctx.cache[key];
+    const bron = (ctx.bron || ctx.alle).filter(d => maanden.includes(G.monthOf(d.datum)));
+    let n = 0, wk = 0, lt = 0, N = 0, WK = 0, LT = 0;
+    for (const d of bron) {
+      const t = tijd(d); N++; if (t.weekend) WK++; if (t.laat) LT++;
+      if (vastOk(ctx, m, d, { negeerUitvraag: true }).ok) { n++; if (t.weekend) wk++; if (t.laat) lt++; }
+    }
+    const r = n >= 4 ? { weekend: wk / n, laat: lt / n } : { weekend: N ? WK / N : 0.3, laat: N ? LT / N : 0.3 };
+    ctx.cache[key] = r;
+    return r;
+  }
+
+  // ---------- kosten van het rooster van één medewerker (lager = beter) ----------
+  // Het hele rooster is goed als de som van deze kosten zo laag mogelijk is.
+  function kosten(ctx, m, lijst, maanden) {
+    const P = ctx.P, W = P.w;
+    const k = { uren: 0, oproep: 0, vaste_dag: 0, verlof: 0, liever_niet: 0, dubbel: 0, rust: 0, reeks: 0, weekend: 0, laat: 0, wisselend: 0 };
+    const eerste = maanden[0] + '-01', laatste = G.lastDay(maanden[maanden.length - 1]);
+    const dVan = dagNr(eerste) - 7, dTot = dagNr(laatste) + 7;
+    const raam = [];       // diensten rond de maand(en): voor rust en reeksen
+    const inM = [];        // diensten in de maand(en)
+    for (const d of lijst) {
+      const t = tijd(d);
+      if (t.dag >= dVan && t.dag <= dTot) raam.push(d);
+      if (maanden.includes(t.maand)) inM.push(d);
+    }
+    // 1. uren
+    if (+m.contracturen > 0) {
+      for (const mnd of maanden) {
+        let gepland = 0; for (const d of inM) { const t = tijd(d); if (t.maand === mnd) gepland += t.uren; }
+        const doel = G.doelUren(m, mnd), v = gepland - doel;
+        if (v < 0) k.uren += 0.15 * v * v;
+        else k.uren += 0.3 * v * v + (v > doel * 0.1 ? 3 * (v - doel * 0.1) ** 2 : 0);
+      }
+      k.uren *= W.uren;
     } else {
-      // Oproepkrachten pas als vast personeel aan zijn uren zit, en dan eerlijk verdeeld:
-      // wie de afgelopen/komende 3 maanden het minst heeft gewerkt, gaat voor.
+      // oproepkracht: elk uur kost iets (vast personeel gaat voor) en wie de laatste/komende 3 maanden al veel werkte, komt later aan de beurt
+      let h = 0; for (const d of inM) h += tijd(d).uren;
+      const r1 = dagNr(eerste) - 90, r2 = dagNr(laatste) + 90;
+      let wh = 0; for (const d of lijst) { const t = tijd(d); if (t.dag >= r1 && t.dag <= r2) wh += t.uren; }
+      k.oproep = W.oproep * (6 * h + 0.02 * wh * wh);
+    }
+    // 2. per dag: vaste werkdag, aangevraagd vrij, liever niet, twee diensten op één dag
+    const vast = new Set((m.vaste_dagen || []).map(Number)), liever = new Set((m.liever_niet_dagen || []).map(Number));
+    const aanvr = ctx.verlof.filter(v => v.medewerker_id === m.id && v.status === 'aangevraagd');
+    const datums = new Map();
+    for (const d of inM) datums.set(d.datum, (datums.get(d.datum) || 0) + 1);
+    for (const [datum, n] of datums) {
+      const wd = G.weekday(datum);
+      if (vast.has(wd)) k.vaste_dag -= 40 * W.vaste_dag;
+      if (liever.has(wd)) k.liever_niet += 30 * W.liever_niet;
+      if (aanvr.some(v => v.van <= datum && v.tot >= datum)) k.verlof += 90 * W.verlof * n;
+      if (n > 1) k.dubbel += 50 * (n - 1) * Math.max(W.rust, 0.5);
+    }
+    // 3. rust tussen diensten en reeksen
+    raam.sort((x, y) => tijd(x).a - tijd(y).a);
+    for (let i = 1; i < raam.length; i++) {
+      const a = tijd(raam[i - 1]), b = tijd(raam[i]);
+      if (a.dag === b.dag) continue;                 // zelfde dag: telt al als 'twee diensten'
+      const rust = (b.a - a.b) / 60;
+      if (rust < P.min_rust) k.rust += 8 * (P.min_rust - rust) * W.rust;
+    }
+    let reeks = 0, vorige = null;
+    const dagen = [...new Set(raam.map(d => tijd(d).dag))].sort((x, y) => x - y);
+    for (const dg of dagen) {
+      reeks = (vorige !== null && dg === vorige + 1) ? reeks + 1 : 1;
+      if (reeks > P.max_achter_elkaar) k.reeks += 40 * (reeks - P.max_achter_elkaar) * W.reeks;
+      vorige = dg;
+    }
+    // 4. eerlijk verdelen van weekend- en late diensten
+    if (inM.length && (W.weekend || W.laat)) {
+      const v = verwachting(ctx, m, maanden);
+      let wk = 0, lt = 0; for (const d of inM) { const t = tijd(d); if (t.weekend) wk++; if (t.laat) lt++; }
+      k.weekend = 6 * W.weekend * (wk - v.weekend * inM.length) ** 2;
+      k.laat = 6 * W.laat * (lt - v.laat * inM.length) ** 2;
+    }
+    // 5. zo min mogelijk verschillende begintijden in een week
+    if (W.wisselend) {
+      const perWeek = {};
+      for (const d of inM) { const t = tijd(d); (perWeek[t.week] = perWeek[t.week] || new Set()).add(d.start); }
+      for (const w in perWeek) k.wisselend += 5 * W.wisselend * (perWeek[w].size - 1);
+    }
+    let totaal = 0; for (const x in k) totaal += k[x];
+    return { totaal, k };
+  }
+  G.kosten = kosten;
+
+  // Geeft {ok, score, redenen[]} terug (hoger = beter)
+  // opties.negeerUitvraag: bij zelf oppakken van een open dienst hoeft een oproepkracht niet vooraf 'kan' te hebben gezegd
+  // opties.alleenOk: alleen kijken óf iemand kan (sneller)
+  G.beoordeel = function (ctx, m, slot, opties) {
+    opties = opties || {};
+    const v = vastOk(ctx, m, slot, opties);
+    if (!v.ok) return { ok: false, redenen: [v.reden] };
+    const p = ctx.perMw[m.id] || { diensten: [] };
+    const lijst = p.diensten.filter(d => d !== slot && !(slot.id && d.id === slot.id));
+    const nee = pastErbij(m, slot, lijst);
+    if (nee) return { ok: false, redenen: [nee] };
+    if (opties.alleenOk) return { ok: true, score: 0, redenen: [] };
+
+    const maanden = [G.monthOf(slot.datum)];
+    const voor = kosten(ctx, m, lijst, maanden), na = kosten(ctx, m, lijst.concat([slot]), maanden);
+    const delta = x => na.k[x] - voor.k[x];
+    const redenen = [];
+    if (delta('vaste_dag') < 0) redenen.push('vaste werkdag');
+    if (v.reactieKan) redenen.push('heeft gezegd te kunnen');
+    const maand = maanden[0], t = tijd(slot);
+    if (+m.contracturen > 0) {
+      const doel = G.doelUren(m, maand);
+      const gepland = lijst.reduce((s, d) => s + (tijd(d).maand === maand ? tijd(d).uren : 0), 0);
+      if (gepland + t.uren > doel * 1.1) redenen.push('komt boven contracturen');
+      else if (doel - gepland >= 4) redenen.push('nog ' + Math.round(doel - gepland) + ' u tekort');
+    } else {
       const van = G.addDays(slot.datum, -90), tot = G.addDays(slot.datum, 90);
-      const recent = p.diensten.filter(d => d.datum >= van && d.datum <= tot).reduce((s, d) => s + G.hours(d.start, d.eind), 0);
-      score -= 75 + recent * 0.6 + Math.random() * 1.5;               // klein toeval i.p.v. alfabet of wie eerst reageerde
+      const recent = lijst.filter(d => d.datum >= van && d.datum <= tot).reduce((s, d) => s + tijd(d).uren, 0);
       redenen.push('oproepkracht · ' + Math.round(recent) + ' u in 3 mnd');
     }
-    if (reactieKan) redenen.unshift('heeft gezegd te kunnen');
-    if ((m.vaste_dagen || []).map(Number).includes(wd)) { score += 80; redenen.unshift('vaste werkdag'); }
-    if (vl && vl.status === 'aangevraagd') { score -= 90; redenen.push('heeft vrij aangevraagd'); }
-    if (dagen.has(slot.datum)) { score -= 65; redenen.push('tweede dienst die dag'); }
-    // gisteren laat gewerkt en vandaag vroeg? kleine straf
-    const gisteren = G.addDays(slot.datum, -1);
-    if (p.diensten.some(d => d.datum === gisteren && (G.min(d.eind) <= G.min(d.start) || G.min(d.eind) >= 23 * 60)) && G.min(slot.start) < 12 * 60) {
-      score -= 25; redenen.push('gisteren laat');
+    if (delta('verlof') > 0) redenen.push('heeft vrij aangevraagd');
+    if (delta('liever_niet') > 0) redenen.push('liever niet op ' + ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag'][t.wd]);
+    if (delta('dubbel') > 0) redenen.push('tweede dienst die dag');
+    if (delta('rust') > 0) {
+      let kort = Infinity;
+      for (const d of lijst) { const u = tijd(d); if (u.dag === t.dag) continue; const r = u.b <= t.a ? t.a - u.b : u.a >= t.b ? u.a - t.b : Infinity; if (r < kort) kort = r; }
+      redenen.push(kort < Infinity ? 'maar ' + String(Math.round(kort / 30) / 2).replace('.', ',') + ' u rust' : 'korte rust');
     }
-    return { ok: true, score, redenen };
+    if (delta('reeks') > 0) {
+      const dagen = new Set(lijst.map(d => tijd(d).dag)); dagen.add(t.dag);
+      let a = t.dag, b = t.dag; while (dagen.has(a - 1)) a--; while (dagen.has(b + 1)) b++;
+      redenen.push((b - a + 1) + ' dagen achter elkaar');
+    }
+    if (delta('weekend') > 12) redenen.push('al veel weekenddiensten');
+    if (delta('laat') > 12) redenen.push('al veel late diensten');
+    return { ok: true, score: Math.round(-(na.totaal - voor.totaal)), redenen };
   };
 
   // Kandidatenlijst voor een dienst (ook voor de keuzelijst in beheer)
@@ -188,48 +351,144 @@
       .sort((a, b) => (b.ok - a.ok) || ((b.score || 0) - (a.score || 0)) || a.m.naam.localeCompare(b.m.naam));
   };
 
-  // Slots verdelen
+  // Voorspelbaar toeval: met dezelfde gegevens komt er hetzelfde rooster uit
+  function rng(tekst) {
+    let h = 1779033703 ^ tekst.length;
+    for (let i = 0; i < tekst.length; i++) { h = Math.imul(h ^ tekst.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; }
+    let a = h >>> 0;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  const nu = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const DAG_KORT = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
+  const MND_KORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  const uurTekst = u => String(Math.round(u * 2) / 2).replace('.', ',');
+  const kortDatum = s => DAG_KORT[G.weekday(s)] + ' ' + (+s.slice(8)) + ' ' + MND_KORT[+s.slice(5, 7) - 1];
+
+  // Slots verdelen:
+  //  1. eerst de diensten waarvoor de minste mensen kunnen;
+  //  2. per dienst wie het rooster het minst 'duur' maakt;
+  //  3. daarna duizenden keren proberen of het beter kan door een dienst aan iemand anders te geven
+  //     of twee mensen te laten ruilen. Alleen wat het totaal beter maakt blijft staan.
   G.plan = function (slots, data, bestaande, opties) {
     opties = opties || {};
     const ctx = G.context(data, bestaande);
     const meldingen = [];
-    // Volgorde: eerst diensten met weinig kandidaten, dan op datum/tijd
-    const metAantal = slots.map(s => ({ s, n: (data.medewerkers || []).filter(m => G.beoordeel(ctx, m, s).ok).length }));
-    metAantal.sort((a, b) => (a.s.datum < b.s.datum ? -1 : a.s.datum > b.s.datum ? 1 : 0) || a.n - b.n || G.min(a.s.start) - G.min(b.s.start));
-    // per week: schaarste eerst
-    const result = [];
-    const perWeek = {};
-    metAantal.forEach(x => { const w = G.weekStart(x.s.datum); (perWeek[w] = perWeek[w] || []).push(x); });
-    Object.keys(perWeek).sort().forEach(w => perWeek[w].sort((a, b) => a.n - b.n || (a.s.datum < b.s.datum ? -1 : 1)));
-    for (const w of Object.keys(perWeek).sort()) {
-      for (const { s } of perWeek[w]) {
-        const dienst = { id: G.uuid(), maand: G.monthOf(s.datum), datum: s.datum, locatie: s.locatie, event_id: s.event_id || null, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' };
-        const kand = G.kandidaten(ctx, dienst).filter(k => k.ok);
-        if (kand.length) {
-          dienst.medewerker_id = kand[0].m.id;
-          G.registreer(ctx, dienst);
-        } else {
-          meldingen.push('Geen geschikte medewerker voor ' + s.functie + ' op ' + s.datum + ' (' + s.start + '-' + s.eind + ', ' + s.locatie + ')');
-        }
-        result.push(dienst);
+    const mws = (data.medewerkers || []).filter(m => m.actief !== false);
+    const maanden = [...new Set(slots.map(s => G.monthOf(s.datum)))].sort();
+    const OPEN = 2000;
+    const diensten = slots.map(s => ({ id: G.uuid(), maand: G.monthOf(s.datum), datum: s.datum, locatie: s.locatie, event_id: s.event_id || null, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' }));
+    const n = diensten.length;
+    if (!n || !maanden.length) return { diensten, meldingen, info: { geprobeerd: 0, verbeterd: 0 } };
+    ctx.bron = diensten.concat((bestaande || []).filter(d => maanden.includes(G.monthOf(d.datum))));
+
+    const kand = diensten.map(d => mws.filter(m => vastOk(ctx, m, d).ok));
+    const kandSet = kand.map(l => new Set(l.map(m => m.id)));
+    const perId = {}; mws.forEach(m => perId[m.id] = m);
+    const lijst = {}, kost = {};
+    for (const m of mws) { lijst[m.id] = (ctx.perMw[m.id] ? ctx.perMw[m.id].diensten : []).slice(); kost[m.id] = kosten(ctx, m, lijst[m.id], maanden).totaal; }
+    const wie = new Array(n).fill(null);
+    const zonder = (l, d) => { const i = l.indexOf(d); const c = l.slice(); if (i >= 0) c.splice(i, 1); return c; };
+
+    // 1 + 2: opbouwen
+    const volgorde = diensten.map((d, i) => i).sort((a, b) => kand[a].length - kand[b].length || tijd(diensten[a]).a - tijd(diensten[b]).a);
+    for (const i of volgorde) {
+      const d = diensten[i];
+      let beste = null, besteK = Infinity, besteDelta = Infinity;
+      for (const m of kand[i]) {
+        if (pastErbij(m, d, lijst[m.id])) continue;
+        const nk = kosten(ctx, m, lijst[m.id].concat([d]), maanden).totaal;
+        if (nk - kost[m.id] < besteDelta) { besteDelta = nk - kost[m.id]; beste = m; besteK = nk; }
+      }
+      if (beste) { wie[i] = beste.id; d.medewerker_id = beste.id; lijst[beste.id].push(d); kost[beste.id] = besteK; }
+    }
+
+    // 3: verbeteren (simulated annealing)
+    const toeval = rng(maanden.join() + ':' + n + ':' + mws.length);
+    const maxIt = opties.iteraties || Math.min(250000, n * 800);
+    const maxTijd = opties.tijd || 2500;
+    const t0 = nu();
+    let totaal = 0; for (const id in kost) totaal += kost[id]; totaal += OPEN * wie.filter(x => !x).length;
+    let beste = totaal, besteWie = wie.slice(), verbeterd = 0, it = 0;
+    const T0 = 40, T1 = 0.3;
+    for (; it < maxIt; it++) {
+      if ((it & 1023) === 0 && nu() - t0 > maxTijd) break;
+      const T = T0 * Math.pow(T1 / T0, it / maxIt);
+      const i = Math.floor(toeval() * n), d = diensten[i], a = wie[i];
+      if (!kand[i].length) continue;
+      let delta, toepassen;
+      if (toeval() < 0.5 || !a) {
+        // dienst aan iemand anders geven
+        const m = kand[i][Math.floor(toeval() * kand[i].length)];
+        if (m.id === a) continue;
+        if (pastErbij(m, d, lijst[m.id])) continue;
+        const lm = lijst[m.id].concat([d]), km = kosten(ctx, m, lm, maanden).totaal;
+        let la = null, ka = 0;
+        if (a) { la = zonder(lijst[a], d); ka = kosten(ctx, perId[a], la, maanden).totaal; }
+        delta = (km - kost[m.id]) + (a ? ka - kost[a] : -OPEN);
+        toepassen = () => { lijst[m.id] = lm; kost[m.id] = km; if (a) { lijst[a] = la; kost[a] = ka; } wie[i] = m.id; };
+      } else {
+        // twee mensen laten ruilen
+        const j = Math.floor(toeval() * n), b = wie[j], e = diensten[j];
+        if (!b || b === a || !kandSet[j].has(a) || !kandSet[i].has(b)) continue;
+        const la = zonder(lijst[a], d), lb = zonder(lijst[b], e);
+        if (pastErbij(perId[a], e, la) || pastErbij(perId[b], d, lb)) continue;
+        la.push(e); lb.push(d);
+        const ka = kosten(ctx, perId[a], la, maanden).totaal, kb = kosten(ctx, perId[b], lb, maanden).totaal;
+        delta = (ka - kost[a]) + (kb - kost[b]);
+        toepassen = () => { lijst[a] = la; kost[a] = ka; lijst[b] = lb; kost[b] = kb; wie[i] = b; wie[j] = a; };
+      }
+      if (delta < 0 || toeval() < Math.exp(-delta / T)) {
+        toepassen(); totaal += delta;
+        if (totaal < beste - 1e-6) { beste = totaal; besteWie = wie.slice(); verbeterd++; }
       }
     }
-    result.sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0) || G.min(a.start) - G.min(b.start) || a.locatie.localeCompare(b.locatie));
+
+    // beste oplossing terugzetten
+    const eind = {}; for (const m of mws) eind[m.id] = (ctx.perMw[m.id] ? ctx.perMw[m.id].diensten : []).slice();
+    diensten.forEach((d, i) => { d.medewerker_id = besteWie[i]; if (besteWie[i]) eind[besteWie[i]].push(d); });
+
+    const result = diensten.slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0) || G.min(a.start) - G.min(b.start) || a.locatie.localeCompare(b.locatie));
+    for (const d of result) if (!d.medewerker_id) meldingen.push('Geen geschikte medewerker voor ' + d.functie + ' op ' + d.datum + ' (' + d.start + '-' + d.eind + ', ' + d.locatie + ')');
+
+    // wat er niet helemaal gelukt is
+    const P = ctx.P;
+    for (const m of mws) {
+      const eigen = eind[m.id].filter(d => maanden.includes(G.monthOf(d.datum)));
+      if (!eigen.some(d => diensten.includes(d))) continue;
+      const dagen = [...new Set(eind[m.id].map(d => tijd(d).dag))].sort((x, y) => x - y);
+      for (let i = 0; i < dagen.length;) {
+        let j = i; while (j + 1 < dagen.length && dagen[j + 1] === dagen[j] + 1) j++;
+        if (j - i + 1 > P.max_achter_elkaar && P.w.reeks) {
+          const van = G.fmt(new Date(dagen[i] * 864e5)), tot = G.fmt(new Date(dagen[j] * 864e5));
+          if (maanden.includes(G.monthOf(van)) || maanden.includes(G.monthOf(tot))) meldingen.push(m.naam + ' werkt ' + (j - i + 1) + ' dagen achter elkaar (' + kortDatum(van) + ' t/m ' + kortDatum(tot) + ')');
+        }
+        i = j + 1;
+      }
+      if (P.w.rust) {
+        const s = eind[m.id].slice().sort((x, y) => tijd(x).a - tijd(y).a);
+        for (let i = 1; i < s.length; i++) {
+          const a = tijd(s[i - 1]), b = tijd(s[i]);
+          if (a.dag === b.dag || !maanden.includes(b.maand)) continue;
+          const r = (b.a - a.b) / 60;
+          if (r < P.min_rust) meldingen.push(m.naam + ' heeft maar ' + uurTekst(r) + ' uur rust voor ' + kortDatum(s[i].datum) + ' (' + s[i].start + ')');
+        }
+      }
+    }
     // urencheck
-    const maanden = opties.geenUrencheck ? [] : [...new Set(slots.map(s => G.monthOf(s.datum)))];
-    for (const maand of maanden) for (const m of (data.medewerkers || []).filter(m => m.actief !== false && +m.contracturen > 0)) {
-      const doel = G.doelUren(m, maand), gepland = (ctx.perMw[m.id] && ctx.perMw[m.id].uren[maand]) || 0;
+    const urenMaanden = opties.geenUrencheck ? [] : maanden;
+    for (const maand of urenMaanden) for (const m of mws.filter(m => +m.contracturen > 0)) {
+      const doel = G.doelUren(m, maand), gepland = eind[m.id].filter(d => d.datum.startsWith(maand)).reduce((s, d) => s + tijd(d).uren, 0);
       if (gepland < doel * 0.85) meldingen.push(m.naam + ': ' + Math.round(gepland) + ' van ~' + Math.round(doel) + ' uur ingepland in ' + maand);
     }
-    return { diensten: result, meldingen };
+    return { diensten: result, meldingen, info: { geprobeerd: it, verbeterd, ms: Math.round(nu() - t0) } };
   };
 
   // Complete maand maken. Bestaande diensten uit andere maanden tellen mee voor overlap.
-  G.generateMonth = function (maand, data) {
+  G.generateMonth = function (maand, data, opties) {
     const slots = G.buildSlots(maand, data);
     // andere maanden + diensten van feesten die al via de uitvraag zijn vastgezet tellen mee
     const elders = (data.diensten || []).filter(d => d.maand !== maand || G.dienstVast(d, data));
-    return G.plan(slots, data, elders);
+    return G.plan(slots, data, elders, opties);
   };
 
   // Uitvraag afsluiten: alle feesten in één keer verdelen (eerlijk over de datums heen)

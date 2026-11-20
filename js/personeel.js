@@ -77,7 +77,7 @@
   // kan ik deze dienst doen?
   function kanIk(dienst) {
     const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== dienst.id));
-    return G.beoordeel(ctx, ik, { ...dienst, medewerker_id: null }, { negeerUitvraag: true });
+    return G.beoordeel(ctx, ik, { ...dienst, medewerker_id: null }, { negeerUitvraag: true, alleenOk: true });
   }
   const ruilAanbod = () => A.data.ruilverzoeken.filter(r => r.status === 'open' && r.van_id !== ik.id).map(r => ({ r, d: A.data.diensten.find(x => x.id === r.dienst_id) }))
     .filter(x => x.d && x.d.datum >= G.today() && zichtbaar(x.d) && kanIk(x.d).ok);
@@ -234,14 +234,14 @@
 
   async function ruilAanbieden(d) {
     const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== d.id));
-    const kunnen = A.data.medewerkers.filter(m => m.id !== ik.id && G.beoordeel(ctx, m, { ...d, medewerker_id: null }, { negeerUitvraag: true }).ok);
+    const kunnen = A.data.medewerkers.filter(m => m.id !== ik.id && G.beoordeel(ctx, m, { ...d, medewerker_id: null }, { negeerUitvraag: true, alleenOk: true }).ok);
     const anderen = A.data.medewerkers.filter(m => m.id !== ik.id && m.actief !== false && !kunnen.includes(m)).sort((a, b) => a.naam.localeCompare(b.naam));
     const goedk = A.data.instellingen.ruil_goedkeuring;
     // diensten van de gekozen collega die ik terug zou kunnen nemen
     const terugOpties = mid => {
       const ctx2 = G.context(A.data, A.data.diensten.filter(x => x.id !== d.id));
       return A.data.diensten.filter(x => x.medewerker_id === mid && x.datum >= G.today() && zichtbaar(x) && !actieveRuil(x.id))
-        .filter(x => { const c = G.context(A.data, A.data.diensten.filter(y => y.id !== x.id && y.id !== d.id)); return G.beoordeel(c, ik, { ...x, medewerker_id: null }, { negeerUitvraag: true }).ok; })
+        .filter(x => { const c = G.context(A.data, A.data.diensten.filter(y => y.id !== x.id && y.id !== d.id)); return G.beoordeel(c, ik, { ...x, medewerker_id: null }, { negeerUitvraag: true, alleenOk: true }).ok; })
         .sort((a, b) => a.datum.localeCompare(b.datum));
     };
     const res = await A.modal('Dienst ruilen', `<p><b>${esc(A.datumLang(d.datum))}</b>, ${tijd(d)} (${A.LOC[d.locatie]}, ${esc(d.functie)})</p>
