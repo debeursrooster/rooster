@@ -348,3 +348,12 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .uitnodig-info { flex: 1 1 200px; }
 .uitnodig-pin { font-size: 2rem; font-weight: 800; letter-spacing: .15em; }
 .uitnodig-knoppen { display: flex; flex-direction: column; gap: .45em; align-items: stretch; }
+.dienst.voorlopig { border-left-style: dashed; background: repeating-linear-gradient(135deg, #faf6ef, #faf6ef 6px, #f4eee4 6px, #f4eee4 12px); opacity: .9; }
+.dienst.voorlopig .naam { font-style: italic; }
+.dienst.voorlopig.open { background: repeating-linear-gradient(135deg, var(--fout-licht), var(--fout-licht) 6px, #f9dcdc 6px, #f9dcdc 12px); }
+.vl-kop { font-size: .7rem; font-weight: 700; padding: .1em .45em; border-radius: 99px; margin: .15em 0; cursor: pointer; display: inline-block; }
+.vl-kop.fout { color: var(--fout); background: var(--fout-licht); }
+.vl-kop.ok { color: var(--ok); background: var(--ok-licht); }
+.voorlopig-i { background: repeating-linear-gradient(135deg, #e9dfcf, #e9dfcf 3px, #fff 3px, #fff 6px) !important; border: 1px dashed #b3a898; }
+.uv-voorlopig { font-size: .8rem; margin-top: .35em; line-height: 1.45; }
+.uv-voorlopig .fout, .fout-tekst { color: var(--fout); }
