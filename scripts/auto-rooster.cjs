@@ -43,7 +43,9 @@ function vandaagNL() {
   if (nu < vanaf) return console.log('Nog niet aan de beurt.');
   if (data.roosters.some(r => r.maand === volgende)) return console.log('Rooster bestaat al, niets te doen.');
 
-  const res = G.generateMonth(volgende, data);
+  // Op GitHub is er tijd genoeg: de planner mag hier langer zoeken naar het beste rooster
+  const res = G.generateMonth(volgende, data, { tijd: 30000, iteraties: 400000 });
+  console.log(`Planner: ${res.info.geprobeerd} varianten geprobeerd, ${res.info.verbeterd}x verbeterd, ${res.info.ms} ms.`);
   await store.insert('diensten', res.diensten);
   const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
   const tijd = new Date().toISOString();
