@@ -80,9 +80,11 @@
   const vlOpen = (vanaf, maand) => voorlopig().diensten.filter(x => !x.medewerker_id && x.datum >= (vanaf || '') && (!maand || x.datum.startsWith(maand)));
   function opnieuw() { (PAGINAS[(location.hash || '#overzicht').slice(1).split('/')[0]] || PAGINAS.overzicht)(); updateTellers(); }
 
+  const feestTeKeuren = () => A.data.event_reacties.filter(r => r.overname_door && r.aangeboden && r.bevestigd_functie && A.event(r.event_id) && A.event(r.event_id).status === 'open');
   function updateTellers() {
     const n = A.data.verlof.filter(v => v.status === 'aangevraagd').length +
       A.data.ruilverzoeken.filter(r => r.status === 'overgenomen').length +
+      feestTeKeuren().length +
       A.data.ziekmeldingen.filter(z => z.status === 'gemeld').length;
     const t = $('#telAanvragen'); t.textContent = n; t.classList.toggle('verborgen', !n);
   }
@@ -433,6 +435,13 @@
     const vOpen = d.verlof.filter(v => v.status === 'aangevraagd').sort((a, b) => a.van.localeCompare(b.van));
     const vRest = d.verlof.filter(v => v.status !== 'aangevraagd' && v.tot >= G.addDays(nu, -60)).sort((a, b) => b.van.localeCompare(a.van));
     const rTeKeuren = d.ruilverzoeken.filter(r => r.status === 'overgenomen');
+    const fTeKeuren = feestTeKeuren();
+    const feestRuilItem = r => { const e = A.event(r.event_id);
+      return `<div class="item"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div>
+        <div><div class="wie">${esc(A.mwNaam(r.medewerker_id))} → ${esc(A.mwNaam(r.overname_door))}</div>
+        <div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)} · 🎉 ${esc(e.naam)} · ${esc(r.bevestigd_functie)}</div>
+        <div class="meta">Bevestigde plek, feest nog niet ingepland</div></div>
+        <div class="rechts"><button class="knop klein gevaar" data-fraf="${r.id}">Afwijzen</button><button class="knop klein ok" data-frgoed="${r.id}">Goedkeuren</button></div></div>`; };
     const rOpen = d.ruilverzoeken.filter(r => r.status === 'open' || r.status === 'gevraagd');
     const rRest = d.ruilverzoeken.filter(r => ['goedgekeurd', 'afgewezen', 'geweigerd'].includes(r.status)).sort((a, b) => (b.aangemaakt_op || '').localeCompare(a.aangemaakt_op || '')).slice(0, 15);
     const nb = d.beschikbaarheid.filter(b => b.datum >= nu).sort((a, b) => a.datum.localeCompare(b.datum));
@@ -454,7 +463,7 @@
         <div class="rechts">${r.status === 'overgenomen' ? `<button class="knop klein gevaar" data-raf="${r.id}">Afwijzen</button><button class="knop klein ok" data-rgoed="${r.id}">Goedkeuren</button>` : r.status === 'open' ? `<button class="knop klein" data-rtoewijs="${r.id}">Zelf iemand kiezen</button>` : r.status === 'gevraagd' ? '<span class="label let">wacht op collega</span>' : `<span class="label ${r.status === 'goedgekeurd' ? 'ok' : 'fout'}">${{ goedgekeurd: 'geruild', afgewezen: 'afgewezen', geweigerd: 'collega zei nee' }[r.status] || r.status}</span>`}</div></div>`; };
 
     hoofd.innerHTML = `<div class="kop"><h1>Aanvragen</h1><div class="tabs" id="aTabs">
-        <button data-v="verlof">Vrij vragen ${vOpen.length ? `(${vOpen.length})` : ''}</button><button data-v="ruil">Ruilen ${rTeKeuren.length ? `(${rTeKeuren.length})` : ''}</button><button data-v="beschikbaar">Kan niet</button><button data-v="ziek">Ziek ${d.ziekmeldingen.filter(z => z.status === 'gemeld').length ? `(${d.ziekmeldingen.filter(z => z.status === 'gemeld').length})` : ''}</button></div></div>
+        <button data-v="verlof">Vrij vragen ${vOpen.length ? `(${vOpen.length})` : ''}</button><button data-v="ruil">Ruilen ${rTeKeuren.length + fTeKeuren.length ? `(${rTeKeuren.length + fTeKeuren.length})` : ''}</button><button data-v="beschikbaar">Kan niet</button><button data-v="ziek">Ziek ${d.ziekmeldingen.filter(z => z.status === 'gemeld').length ? `(${d.ziekmeldingen.filter(z => z.status === 'gemeld').length})` : ''}</button></div></div>
       <div id="aInh"></div>`;
     hoofd.querySelectorAll('#aTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === sub); b.onclick = () => { location.hash = 'aanvragen/' + b.dataset.v; }; });
     const inh = $('#aInh');
@@ -476,7 +485,7 @@
       return;
     }
     if (sub === 'ruil') {
-      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Goed te keuren</h3></div>${rTeKeuren.length ? rTeKeuren.map(ruilItem).join('') : '<div class="leeg">Niets goed te keuren</div>'}</div>
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Goed te keuren</h3></div>${rTeKeuren.length || fTeKeuren.length ? fTeKeuren.map(feestRuilItem).join('') + rTeKeuren.map(ruilItem).join('') : '<div class="leeg">Niets goed te keuren</div>'}</div>
         <div class="paneel"><div class="paneel-kop"><h3>Lopend (nog geen collega akkoord)</h3></div>${rOpen.length ? rOpen.map(ruilItem).join('') : '<div class="leeg">Geen openstaande ruilverzoeken</div>'}</div>
         <div class="paneel"><div class="paneel-kop"><h3>Afgehandeld</h3></div>${rRest.length ? rRest.map(ruilItem).join('') : '<div class="leeg">Nog niets</div>'}</div>`;
     } else if (sub === 'beschikbaar') {
@@ -489,9 +498,30 @@
     }
     inh.querySelectorAll('[data-goed]').forEach(b => b.onclick = () => verlofBeslissen(b.dataset.goed, true));
     inh.querySelectorAll('[data-af]').forEach(b => b.onclick = () => verlofBeslissen(b.dataset.af, false));
+    inh.querySelectorAll('[data-frgoed]').forEach(b => b.onclick = () => A.bezig(b, () => feestRuilBeslissen(b.dataset.frgoed, true)));
+    inh.querySelectorAll('[data-fraf]').forEach(b => b.onclick = () => A.bezig(b, () => feestRuilBeslissen(b.dataset.fraf, false)));
     inh.querySelectorAll('[data-rgoed]').forEach(b => b.onclick = () => A.bezig(b, () => ruilBeslissen(b.dataset.rgoed, true)));
     inh.querySelectorAll('[data-raf]').forEach(b => b.onclick = () => A.bezig(b, () => ruilBeslissen(b.dataset.raf, false)));
     inh.querySelectorAll('[data-rtoewijs]').forEach(b => b.onclick = () => { const r = d.ruilverzoeken.find(x => x.id === b.dataset.rtoewijs); const x = d.diensten.find(y => y.id === r.dienst_id); staat.maand = x.maand; dienstModal(x); });
+  }
+
+  async function feestRuilBeslissen(id, goed) {
+    await A.reload();
+    const r = A.data.event_reacties.find(x => x.id === id);
+    if (!r || !r.overname_door) { A.toast('Dit verzoek is al afgehandeld of ingetrokken', 'fout'); await herlaad(); return opnieuw(); }
+    const e = A.event(r.event_id), naar = r.overname_door, van = r.medewerker_id, om = A.feestOmschr(e, r.bevestigd_functie);
+    if (goed) {
+      await A.feestOvernameUitvoeren(r, naar);
+      await A.melding(naar, `✅ Goedgekeurd: je bent nu bevestigd voor ${om}.`, { titel: 'Ruil goedgekeurd' });
+      await A.melding(van, `✅ Goedgekeurd: ${A.mwNaam(naar)} neemt jouw plek over bij ${om}. Je staat er niet meer op.`, { titel: 'Ruil goedgekeurd' });
+      A.toast('Goedgekeurd', 'ok');
+    } else {
+      await Store.update('event_reacties', r.id, { overname_door: null });
+      await A.melding(naar, `Je overname van de plek bij ${om} is niet goedgekeurd. ${A.mwNaam(van)} blijft ingepland.`);
+      await A.melding(van, `De overname door ${A.mwNaam(naar)} bij ${om} is niet goedgekeurd. Je staat er nog op; je plek blijft aangeboden.`);
+      A.toast('Afgewezen');
+    }
+    await herlaad(); opnieuw();
   }
 
   // ---------------- ziekmeldingen ----------------
@@ -925,7 +955,7 @@
       const regel = m => { const r = st.reac.find(r => r.medewerker_id === m.id);
         const bev = r && r.kan && r.bevestigd_functie;
         const knop = r && r.kan && e.status === 'open' ? (bev ? `<button class="knop klein plat" type="button" data-bev-weg="${r.id}">Intrekken</button>` : `<button class="knop klein ok" type="button" data-bev="${r.id}">Bevestigen</button>`) : '';
-        return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
+        return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>${r.aangeboden ? ` <span class="label let">🔁 ${r.overname_door ? esc(A.mwNaam(r.overname_door)) + ' wil overnemen' : 'aangeboden'}</span>` : ''}` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
         <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
         ${e.status === 'concept' || e.status === 'ingepland' ? `<div class="meta" style="margin-bottom:.4em">${e.status === 'concept' ? '<b>Ingepland, nog niet verstuurd:</b> ' : '<b>Ingepland:</b> '}${A.data.diensten.filter(x => x.event_id === e.id).map(x => esc(x.functie) + ' ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</div>` : ''}
@@ -1526,7 +1556,8 @@
           <div class="veld"><label>Personeel kan tot dag … van de maand doorgeven wanneer ze volgende maand niet kunnen</label><input type="number" min="1" max="31" id="iSlot" value="${esc(s.beschikbaarheid_slot || 25)}"></div></div>
         <div class="veld" style="max-width:420px"><label>Oproepkrachten krijgen … dagen om te reageren op nieuwe feesten</label><input type="number" min="1" max="30" id="iUitvraag" value="${esc(s.uitvraag_dagen || 7)}"></div>
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
-        <label class="check"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
+        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
+        <label class="check"><input type="checkbox" id="iFeestRuil" ${s.feest_ruil_goedkeuring ? 'checked' : ''}> Overnemen van een bevestigde feestplek (nog vóór het inplannen) eerst laten goedkeuren door beheer</label>
         <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
       ${plannerPaneel(s)}
       <div class="paneel"><h3>🎉 Standaard bezetting feesten</h3>
@@ -1551,9 +1582,9 @@
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
+      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, feest_ruil_goedkeuring: $('#iFeestRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
       // Kolommen die nog niet in Supabase bestaan overslaan, met uitleg welk SQL-bestand nodig is
-      const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'] };
+      const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'], feest_ruil_goedkeuring: ['goedkeuren van feestplekken', 'ruilen-feest.sql'] };
       const gemist = [];
       for (let poging = 0; ; poging++) {
         try { await Store.update('instellingen', 1, wijz); break; }

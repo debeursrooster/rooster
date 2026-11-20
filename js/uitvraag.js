@@ -99,6 +99,13 @@
       const res = G.planEvents(klaar, data);
       await store.insert('diensten', res.diensten);
       data.diensten.push(...res.diensten);
+      // Bevestigde plekken die iemand al had aangeboden: wordt nu een gewoon ruilaanbod van de echte dienst
+      for (const r of reacties.filter(r => ids.has(r.event_id) && r.aangeboden && r.bevestigd_functie)) {
+        const d = res.diensten.find(d => d.event_id === r.event_id && d.medewerker_id === r.medewerker_id);
+        if (d) await store.insert('ruilverzoeken', { dienst_id: d.id, van_id: r.medewerker_id, naar_id: r.overname_door || null, terug_dienst_id: null, status: r.overname_door ? 'overgenomen' : 'open', bericht: '', aangemaakt_op: nu });
+        await store.update('event_reacties', r.id, { aangeboden: false, overname_door: null });
+        r.aangeboden = false; r.overname_door = null;
+      }
       const ins = data.instellingen || {};
       for (const e of klaar) { await store.update('zalen_events', e.id, { status: 'concept' }); e.status = 'concept'; }
       const open = res.diensten.filter(d => !d.medewerker_id);

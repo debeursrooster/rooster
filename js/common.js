@@ -50,6 +50,16 @@
     return App.data;
   };
 
+  // Bevestigde feestplek overzetten naar een collega (direct, of na goedkeuring door beheer)
+  App.feestOvernameUitvoeren = async (r, naarId) => {
+    const e = App.event(r.event_id), f = r.bevestigd_functie, tijd = new Date().toISOString();
+    const eigen = App.data.event_reacties.find(x => x.event_id === e.id && x.medewerker_id === naarId);
+    if (eigen) await Store.update('event_reacties', eigen.id, { kan: true, bevestigd_functie: f, aangeboden: false, overname_door: null, tijd });
+    else await Store.insert('event_reacties', { event_id: e.id, medewerker_id: naarId, kan: true, opmerking: '', tijd, bevestigd_functie: f, aangeboden: false });
+    await Store.update('event_reacties', r.id, { kan: false, bevestigd_functie: null, aangeboden: false, overname_door: null });
+  };
+  App.feestOmschr = (e, f) => `${e.naam} op ${App.datumLang(e.datum)} (${e.start}–${e.eind}${f && f !== 'bevestigd' ? ', ' + f : ''})`;
+
   // Elke melding gaat ook als pushbericht naar de telefoon (via Supabase). extra = { titel, link }
   App.melding = (medewerker_id, tekst, extra) => {
     const rij = { medewerker_id: medewerker_id || null, tekst, gelezen: false, tijd: new Date().toISOString() };
