@@ -29,6 +29,10 @@
       $('#stapNaam').classList.add('verborgen'); $('#stapPin').classList.remove('verborgen');
       $('#pin').value = ''; $('#pin').focus();
     });
+    // Persoonlijke uitnodigingslink (…?m=<id>): naam staat al klaar
+    const uitn = new URLSearchParams(location.search).get('m');
+    const knop = uitn && $('#namen').querySelector(`button[data-id="${CSS.escape(uitn)}"]`);
+    if (knop) knop.click();
   }
   $('#terugNaam').onclick = e => { e.preventDefault(); $('#stapPin').classList.add('verborgen'); $('#stapNaam').classList.remove('verborgen'); };
   $('#stapPin').onsubmit = e => {

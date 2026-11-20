@@ -1124,8 +1124,8 @@
   function pPersoneel() {
     const alle = A.data.medewerkers.slice().sort((a, b) => (b.actief !== false) - (a.actief !== false) || a.naam.localeCompare(b.naam));
     const maand = G.monthOf(G.today());
-    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
-      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th></tr></thead><tbody>
+    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
+      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
         <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? ' <span class="label">uit dienst</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
         <td>${(m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}</td>
@@ -1133,13 +1133,119 @@
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>
         <td>${(m.vaste_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
         <td>${(m.vrije_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
-        <td>${A.uren(urenVan(m.id, maand))} u</td></tr>`).join('')}
+        <td>${A.uren(urenVan(m.id, maand))} u</td>
+        <td>${m.actief !== false ? `<button class="knop klein" type="button" data-uitnodig="${m.id}">📲 Uitnodigen</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>${alle.length ? '' : '<div class="leeg"><span class="groot">👥</span>Nog geen personeel. Voeg je eerste medewerker toe.</div>'}</div>`;
     $('#nieuwMw').onclick = () => mwModal(null);
     $('#mwBericht').onclick = () => berichtAanPersoneel();
+    $('#mwPoster').onclick = () => posterPrinten();
+    hoofd.querySelectorAll('[data-uitnodig]').forEach(b => b.onclick = e => { e.stopPropagation(); uitnodigen(A.mw(b.dataset.uitnodig)); });
     hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => mwModal(A.mw(r.dataset.mw)));
   }
 
+
+  // =====================================================================
+  //  Uitnodigen: WhatsApp, QR-code, persoonlijk kaartje en poster
+  // =====================================================================
+  const bedrijfNaam = () => A.data.instellingen.bedrijfsnaam || 'ons bedrijf';
+  // Persoonlijke link: op de personeelspagina staat de naam dan al klaar, alleen de PIN nog invullen
+  const persoonlijkeLink = m => { const u = siteUrl(); return u + (u.includes('?') ? '&' : '?') + 'm=' + encodeURIComponent(m.id); };
+  const basisUrl = () => siteUrl().replace(/[^/]*([?#].*)?$/, '');
+  function qrSvg(tekst, px) {
+    const q = qrcode(0, 'M'); q.addData(tekst); q.make();
+    const n = q.getModuleCount(), r = 2;
+    let d = '';
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) d += `M${x + r} ${y + r}h1v1h-1z`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n + 2 * r} ${n + 2 * r}" width="${px}" height="${px}" shape-rendering="crispEdges" style="display:block;max-width:100%;height:auto"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  }
+  const waNummer = tel => { let t = (tel || '').replace(/\D/g, ''); if (t.startsWith('00')) t = t.slice(2); else if (t.startsWith('0')) t = '31' + t.slice(1); return t; };
+  const uitnodigingTekst = m => `Hoi ${m.naam}! 👋\nVanaf nu staat het rooster van ${bedrijfNaam()} in een app.\n\n1️⃣ Open deze link: ${persoonlijkeLink(m)}\n2️⃣ Log in met je code: *${m.pin}*\n3️⃣ Zet de app op je beginscherm en zet de meldingen aan, dan mis je niets.\n\n📱 iPhone: open de link in Safari, tik op Deel (vierkantje met pijltje) en kies "Zet op beginscherm".\n📱 Android: tik op "App installeren" in de app.\n\nHier zie je je diensten, vraag je vrij en kun je ruilen.`;
+
+  async function kopieer(tekst) {
+    try { await navigator.clipboard.writeText(tekst); }
+    catch (e) { const t = document.createElement('textarea'); t.value = tekst; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+    A.toast('Gekopieerd', 'ok');
+  }
+
+  function uitnodigen(m, nieuw) {
+    const nr = waNummer(m.telefoon);
+    const html = `${nieuw ? `<p><b>${esc(m.naam)}</b> is toegevoegd. Stuur nu de uitnodiging, of laat de QR-code scannen.</p>` : ''}
+      <div class="uitnodig">
+        <div class="uitnodig-qr">${qrSvg(persoonlijkeLink(m), 220)}<small class="zacht">Scannen met de camera van de telefoon</small></div>
+        <div class="uitnodig-info">
+          <div class="zacht" style="font-size:.85rem">Inlogcode van ${esc(m.naam)}</div>
+          <div class="uitnodig-pin">${esc(m.pin)}</div>
+          <p class="zacht" style="font-size:.85rem;margin:.2em 0 1em">Via de QR-code of de link staat de naam al klaar; alleen de code nog invullen.</p>
+          <div class="uitnodig-knoppen">
+            <button class="knop ok" type="button" id="uWa">💬 WhatsApp${nr ? ' naar ' + esc(m.naam) : ''}</button>
+            <button class="knop" type="button" id="uKopieer">📋 Tekst kopiëren</button>
+            <button class="knop" type="button" id="uPrint">🖨 Kaartje printen</button>
+          </div>
+          ${nr ? '' : '<p class="zacht" style="font-size:.8rem;margin:.6em 0 0">Geen telefoonnummer ingevuld: in WhatsApp kies je zelf naar wie.</p>'}
+        </div>
+      </div>`;
+    A.modal('Uitnodigen: ' + m.naam, html, [{ label: 'Sluiten', waarde: null }], bg => {
+      bg.querySelector('#uWa').onclick = () => window.open(`https://wa.me/${nr}?text=` + encodeURIComponent(uitnodigingTekst(m)), '_blank');
+      bg.querySelector('#uKopieer').onclick = () => kopieer(uitnodigingTekst(m));
+      bg.querySelector('#uPrint').onclick = () => kaartjePrinten(m);
+    });
+  }
+
+  function printVenster(titel, inhoud) {
+    const w = window.open('', '_blank');
+    if (!w) return A.toast('Pop-up geblokkeerd: sta pop-ups toe voor deze pagina', 'fout');
+    w.document.write(`<!DOCTYPE html><html lang="nl"><head><meta charset="utf-8"><title>${esc(titel)}</title><base href="${esc(basisUrl())}">
+      <style>
+        @page { size: A4; margin: 14mm; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #2a2118; margin: 0; text-align: center; }
+        .logo { height: 34mm; margin: 4mm auto 6mm; display: block; }
+        h1 { font-size: 30pt; margin: 0 0 3mm; }
+        .sub { font-size: 15pt; color: #6b5e50; margin: 0 0 8mm; }
+        .qr { width: 95mm; margin: 0 auto 8mm; padding: 4mm; border: 2px solid #e8dccb; border-radius: 6mm; }
+        .stappen { text-align: left; max-width: 150mm; margin: 0 auto; font-size: 14pt; line-height: 1.45; padding: 0; list-style: none; counter-reset: s; }
+        .stappen li { counter-increment: s; position: relative; padding-left: 13mm; margin-bottom: 4mm; }
+        .stappen li::before { content: counter(s); position: absolute; left: 0; top: -1mm; width: 9mm; height: 9mm; border-radius: 50%; background: #e07a2f; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+        .klein { font-size: 11pt; color: #6b5e50; }
+        .kaart { width: 120mm; margin: 10mm auto; border: 2px dashed #c9b8a2; border-radius: 6mm; padding: 8mm; }
+        .kaart .logo { height: 20mm; margin: 0 auto 4mm; }
+        .kaart .qr { width: 60mm; margin-bottom: 5mm; }
+        .pin { font-size: 30pt; font-weight: 800; letter-spacing: .15em; margin: 1mm 0 4mm; }
+        .url { font-size: 9.5pt; color: #6b5e50; word-break: break-all; }
+        .knop { margin: 6mm; padding: 3mm 7mm; font-size: 12pt; border-radius: 3mm; border: 0; background: #e07a2f; color: #fff; cursor: pointer; }
+        @media print { .knop { display: none; } }
+      </style></head><body>${inhoud}<button class="knop" onclick="print()">🖨 Printen</button>
+      <script>window.onload = () => setTimeout(() => print(), 300);<\/script></body></html>`);
+    w.document.close();
+  }
+
+  function kaartjePrinten(m) {
+    printVenster('Uitnodiging ' + m.naam, `<div class="kaart">
+      <img class="logo" src="logo-licht.svg" alt="">
+      <h1 style="font-size:20pt">Hoi ${esc(m.naam)}!</h1>
+      <p class="klein" style="margin:0 0 5mm">Je rooster staat vanaf nu in de app. Scan de code met de camera van je telefoon.</p>
+      <div class="qr">${qrSvg(persoonlijkeLink(m), 400)}</div>
+      <div class="klein">Jouw inlogcode</div>
+      <div class="pin">${esc(m.pin)}</div>
+      <p class="klein" style="margin:0 0 3mm">Zet de app daarna op je beginscherm en zet de meldingen aan.<br>Bewaar je code goed en deel hem met niemand.</p>
+      <div class="url">${esc(siteUrl())}</div></div>`);
+  }
+
+  function posterPrinten() {
+    const baas = A.data.instellingen.beheer_naam || 'de baas';
+    printVenster('QR-poster rooster', `
+      <img class="logo" src="logo-licht.svg" alt="">
+      <h1>📅 Ons rooster staat online</h1>
+      <p class="sub">Je diensten bekijken, vrij vragen en ruilen: alles in de app</p>
+      <div class="qr">${qrSvg(siteUrl(), 600)}</div>
+      <ol class="stappen">
+        <li><b>Scan de code</b> met de camera van je telefoon.</li>
+        <li><b>Tik op je naam</b> en vul je inlogcode in. Geen code? Vraag hem aan ${esc(baas)}.</li>
+        <li><b>Zet de app op je beginscherm.</b><br><span class="klein">iPhone: in Safari op Deel (vierkantje met pijltje) → "Zet op beginscherm". Android: tik op "App installeren".</span></li>
+        <li><b>Zet de meldingen aan</b>, dan hoor je het meteen als het rooster klaar is of als iemand wil ruilen.</li>
+      </ol>
+      <p class="url" style="margin-top:6mm">${esc(siteUrl())}</p>`);
+  }
 
   // Opslaan; bestaat de kolom liever_niet_dagen nog niet in Supabase, dan zonder die kolom
   async function mwOpslaan(id, rij) {
@@ -1173,7 +1279,7 @@
         <div class="veld"><label>&nbsp;</label><label class="check"><input type="checkbox" id="mActief" ${m.actief !== false ? 'checked' : ''}> In dienst</label></div></div>
       <div class="veld"><label>Notitie <small>(alleen zichtbaar voor beheer)</small></label><textarea id="mNot">${esc(m.notitie || '')}</textarea></div>`;
     const knoppen = [];
-    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
+    if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' }, { label: '📲 Uitnodigen', waarde: 'uitnodigen' });
     knoppen.push({ label: 'Annuleren', waarde: null }, {
       label: 'Opslaan', soort: 'primair',
       controle: bg => {
@@ -1191,15 +1297,17 @@
     });
     const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen);
     if (!res) return;
+    if (res === 'uitnodigen') return uitnodigen(m);
     if (res === 'weg') {
       const toekomst = A.data.diensten.filter(x => x.medewerker_id === m.id && x.datum >= G.today());
       if (!await A.bevestig('Verwijderen', `${m.naam} wordt verwijderd.${toekomst.length ? ` ${toekomst.length} toekomstige dienst(en) worden open gezet.` : ''} Tip: zet iemand liever op "uit dienst", dan blijft de geschiedenis bewaard.`, 'Verwijderen')) return;
       for (const x of toekomst) await Store.update('diensten', x.id, { medewerker_id: null });
       await Store.remove('medewerkers', m.id);
     } else if (nieuw) {
-      await mwOpslaan(null, res);
-      A.modal('Medewerker toegevoegd', `<p><b>${esc(res.naam)}</b> kan nu inloggen op de personeelspagina met PIN <b>${esc(res.pin)}</b>.</p><p class="zacht">Stuur de link en de code even door:</p>`,
-        [{ label: 'Sluiten', waarde: null }, { label: '💬 Via WhatsApp sturen', soort: 'ok', waarde: () => { window.open(`https://wa.me/${(res.telefoon || '').replace(/\D/g, '').replace(/^0/, '31')}?text=` + encodeURIComponent(`Hoi ${res.naam}! Vanaf nu staat het rooster online: ${siteUrl()}\nJe inlogcode is ${res.pin}`), '_blank'); } }]);
+      const opgeslagen = await mwOpslaan(null, res);
+      await herlaad();
+      const nw = A.mw((opgeslagen && opgeslagen[0] && opgeslagen[0].id) || res.id) || A.data.medewerkers.find(x => x.naam === res.naam && x.pin === res.pin);
+      if (nw) uitnodigen(nw, true);
     } else {
       await mwOpslaan(m.id, res);
       if (m.actief !== false && res.actief === false) {
