@@ -357,3 +357,20 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .voorlopig-i { background: repeating-linear-gradient(135deg, #e9dfcf, #e9dfcf 3px, #fff 3px, #fff 6px) !important; border: 1px dashed #b3a898; }
 .uv-voorlopig { font-size: .8rem; margin-top: .35em; line-height: 1.45; }
 .uv-voorlopig .fout, .fout-tekst { color: var(--fout); }
+
+/* ---------- personeel: mijn / beschikbare diensten ---------- */
+.item.onbevestigd .wie, .item.onbevestigd .meta { color: #a59a8c; }
+.item.onbevestigd .wie .label { opacity: .6; }
+.item.onbevestigd .datumblok { opacity: .55; }
+.schuif { display: inline-flex; align-items: center; gap: .55em; cursor: pointer; margin-left: auto; user-select: none; -webkit-tap-highlight-color: transparent; }
+.schuif input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.schuif .baan { position: relative; width: 58px; height: 32px; border-radius: 999px; background: #c9c3bb; box-shadow: inset 0 2px 4px rgba(0,0,0,.18); transition: background .2s; flex: none; }
+.schuif .baan i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.25); transition: transform .2s; }
+.schuif input:checked + .baan { background: linear-gradient(180deg, #1fb24f, #2bd36a); }
+.schuif input:checked + .baan i { transform: translateX(26px); }
+.schuif input:focus-visible + .baan { outline: 2px solid var(--accent); outline-offset: 2px; }
+.schuif input:disabled + .baan { opacity: .6; }
+.schuif-tekst { font-weight: 700; font-size: .88rem; min-width: 4.6em; color: var(--zacht); }
+.schuif input:checked ~ .schuif-tekst { color: var(--ok); }
+/* 5 knoppen in de onderbalk: tekst op één regel houden */
+.onderbalk button { white-space: nowrap; font-size: clamp(.6rem, 2.85vw, .72rem); padding-left: 0; padding-right: 0; min-width: 0; }
