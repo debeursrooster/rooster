@@ -342,3 +342,9 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .planner-punt { display: grid; grid-template-columns: minmax(0, 1fr) 11em; gap: .6em; align-items: center; padding: .35em 0; border-bottom: 1px solid rgba(0,0,0,.06); }
 .planner-punt span { font-size: .93rem; }
 @media (max-width: 520px) { .planner-punt { grid-template-columns: 1fr; gap: .2em; } }
+.uitnodig { display: flex; gap: 1.2em; align-items: flex-start; flex-wrap: wrap; }
+.uitnodig-qr { flex: 0 0 auto; text-align: center; width: 220px; max-width: 100%; }
+.uitnodig-qr svg { border: 1px solid rgba(0,0,0,.08); border-radius: 10px; margin-bottom: .3em; }
+.uitnodig-info { flex: 1 1 200px; }
+.uitnodig-pin { font-size: 2rem; font-weight: 800; letter-spacing: .15em; }
+.uitnodig-knoppen { display: flex; flex-direction: column; gap: .45em; align-items: stretch; }
