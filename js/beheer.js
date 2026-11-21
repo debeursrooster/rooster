@@ -343,6 +343,108 @@
   }
 
   // Open plekken met dezelfde functie en tijden samenvoegen tot één regel ("Open 3×"); ingevulde diensten blijven los
+  // Overzicht van wie er op een feest is ingepland: per functie een rij, open plekken in rood
+  function indelingHtml(e) {
+    const ds = A.data.diensten.filter(x => x.event_id === e.id)
+      .sort((a, b) => a.functie.localeCompare(b.functie) || !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start));
+    const open = ds.filter(x => !x.medewerker_id).length;
+    const fns = [...new Set(ds.map(x => x.functie))];
+    const wijzig = e.status === 'concept';
+    const tijd = x => (x.start !== e.start || x.eind !== e.eind) ? ` <small class="zacht">${esc(x.start)}–${esc(x.eind)}</small>` : '';
+    return `<div class="indeling">
+      <div class="indeling-kop"><b>${e.status === 'concept' ? '📝 Ingepland, nog niet verstuurd' : '✅ Ingepland en verstuurd'}</b>
+        <span class="label ${open ? 'fout' : 'ok'}">${ds.length - open} van ${ds.length} ingevuld${open ? ` · ${open} open` : ''}</span></div>
+      ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
+        return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
+          <div class="indeling-namen">${rij.map(x => { const m = A.mw(x.medewerker_id);
+            const attr = wijzig ? ` data-wissel="${x.id}" role="button" tabindex="0" title="Klik om iemand anders op deze plek te zetten"` : '';
+            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}"${attr}><span class="stip" style="background:${esc(m.kleur)}"></span>${esc(m.naam)}${tijd(x)}${wijzig ? ' <span class="potlood">✎</span>' : ''}</span>`
+                     : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
+      ${wijzig ? '<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven. Pas na "Versturen naar personeel" krijgt iedereen een melding.</p>' : ''}
+    </div>`;
+  }
+
+  // Iemand anders op een plek van een (nog niet verstuurd) feest zetten, of twee mensen laten wisselen
+  async function wisselPlek(dienstId) {
+    const d = A.data.diensten.find(x => x.id === dienstId); if (!d) return false;
+    const e = A.event(d.event_id);
+    const zelfde = A.data.diensten.filter(x => x.event_id === e.id && x.id !== d.id);
+    const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== d.id));
+    const reactie = m => { const r = A.data.event_reacties.find(x => x.event_id === e.id && x.medewerker_id === m.id); return r ? (r.kan ? 'kan' : 'niet') : 'geen'; };
+    const lbl = { kan: '<span class="label ok">✓ kan</span>', niet: '<span class="label fout">✕ kan niet</span>', geen: '<span class="label">geen reactie</span>' };
+    const kand = G.kandidaten(ctx, { ...d, medewerker_id: null }, { negeerUitvraag: true })
+      .filter(k => k.m.actief !== false && k.m.id !== d.medewerker_id && (k.m.locaties || []).includes('zalen') && (k.m.functies || []).includes(d.functie))
+      .map(k => ({ ...k, rc: reactie(k.m), elders: zelfde.find(x => x.medewerker_id === k.m.id) }))
+      .filter(k => !(k.elders && k.elders.functie === d.functie && k.elders.start === d.start && k.elders.eind === d.eind))
+      .sort((a, b) => ({ kan: 0, geen: 1, niet: 2 }[a.rc] - { kan: 0, geen: 1, niet: 2 }[b.rc]) || (b.ok - a.ok) || a.m.naam.localeCompare(b.m.naam));
+    const optie = (val, html, uit) => `<label class="check wissel-optie${uit ? ' uit' : ''}"><input type="radio" name="wKeuze" value="${val}"> <span>${html}</span></label>`;
+    const nu = A.mw(d.medewerker_id);
+    // Taak wijzigen: wie hier staat naar een andere functie bij hetzelfde feest
+    const taak = [], ruilIds = new Set();
+    if (nu) for (const f of [...new Set(zelfde.map(x => x.functie))].filter(f => f !== d.functie && (nu.functies || []).includes(f))) {
+      const vrij = zelfde.find(x => x.functie === f && !x.medewerker_id);
+      if (vrij) taak.push(optie('__naar:' + vrij.id, `<b>${esc(nu.naam)} → ${esc(f)}</b> <small class="zacht">daar is een plek vrij; ${esc(d.functie)} wordt open</small>`));
+      for (const x of zelfde.filter(x => x.functie === f && x.medewerker_id)) {
+        const p = A.mw(x.medewerker_id);
+        if (p && (p.functies || []).includes(d.functie)) { ruilIds.add(x.id); taak.push(optie('__ruil:' + x.id, `<b>${esc(nu.naam)} → ${esc(f)}</b> <span class="zacht">en</span> <b>${esc(p.naam)} → ${esc(d.functie)}</b> <small class="zacht">(taken ruilen)</small>`)); }
+      }
+    }
+    const html = `<p style="margin-top:0"><b>${esc(e.naam)}</b> · ${esc(A.datumLang(e.datum))} · ${esc(d.functie)} ${esc(d.start)}–${esc(d.eind)}<br><span class="zacht">Nu: ${nu ? esc(nu.naam) : 'open'}</span></p>
+      ${taak.length ? `<h4 style="margin:.2em 0 .3em">🔀 Taak van ${esc(nu.naam)} wijzigen</h4><div class="wissel-lijst" style="margin-bottom:.6em">${taak.join('')}</div>
+        <h4 style="margin:.2em 0 .3em">👤 Of iemand anders op ${esc(d.functie)}</h4>` : ''}
+      <div class="wissel-lijst">
+        ${kand.filter(k => !(k.elders && ruilIds.has(k.elders.id))).map(k => optie(k.m.id, `<span class="stip" style="background:${esc(k.m.kleur)}"></span><b>${esc(k.m.naam)}</b> ${lbl[k.rc]}${k.elders ? ` <span class="label let">${nu ? `staat op ${esc(k.elders.functie)} – wisselen met ${esc(nu.naam)}` : `staat op ${esc(k.elders.functie)} – verplaatsen (die plek wordt open)`}</span>` : ''}${!k.ok && !k.elders ? ` <small class="zacht">(${esc((k.redenen || []).join(', ') || 'past niet')})</small>` : ''}`, !k.ok && !k.elders)).join('') || '<p class="zacht">Niemand anders heeft deze functie.</p>'}
+        ${nu ? optie('__open', '<b style="color:var(--fout)">Plek leeg maken (open)</b>') : ''}
+      </div>
+      <div class="inhuur-blok">
+        ${optie('__inhuur', '<b>🧑‍🍳 Iemand inhuren / van buiten</b>')}
+        <div class="rij" style="margin:.3em 0 0 1.9em">
+          <div class="veld"><label>Naam</label><input id="wInhuurNaam" list="wInhuurLijst" placeholder="bv. Jan (uitzendbureau)"></div>
+          <div class="veld"><label>Telefoon <small>(optioneel)</small></label><input id="wInhuurTel" type="tel"></div>
+        </div>
+        <datalist id="wInhuurLijst">${A.data.medewerkers.filter(m => /^inhuur/i.test(m.notitie || '')).map(m => `<option value="${esc(m.naam)}">`).join('')}</datalist>
+        <small class="zacht" style="display:block;margin-left:1.9em">Staat grijs in de personeelslijst met het label "inhuur", en krijgt geen meldingen of uitvragen.</small>
+      </div>`;
+    let inhuur = null;
+    const keuze = await A.modal('Wie op deze plek?', html, [{ label: 'Annuleren', waarde: null },
+      { label: 'Opslaan', soort: 'primair',
+        controle: bg => { const c = bg.querySelector('input[name=wKeuze]:checked'); if (!c) return 'Kies eerst iemand'; if (c.value === '__inhuur' && !bg.querySelector('#wInhuurNaam').value.trim()) return 'Vul de naam in van wie je inhuurt'; return null; },
+        waarde: bg => { inhuur = { naam: bg.querySelector('#wInhuurNaam').value.trim(), tel: bg.querySelector('#wInhuurTel').value.trim() }; return bg.querySelector('input[name=wKeuze]:checked').value; } }],
+      bg => { const n = bg.querySelector('#wInhuurNaam'); n.addEventListener('input', () => { bg.querySelector('input[name=wKeuze][value="__inhuur"]').checked = true; }); });
+    if (!keuze) return false;
+    if (keuze === '__inhuur') {
+      // ingehuurde kracht: aparte (niet-actieve) medewerker, zodat hij niet in uitvragen, meldingen of de inlog-lijst komt
+      let m = A.data.medewerkers.find(x => /^inhuur/i.test(x.notitie || '') && x.naam.toLowerCase() === inhuur.naam.toLowerCase());
+      if (!m) {
+        m = { id: Store.uuid(), naam: inhuur.naam, pin: '', telefoon: inhuur.tel, email: '', functies: [d.functie], locaties: ['zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 7, kleur: '#8d99ae', actief: false, in_dienst_sinds: null, notitie: 'Inhuur', liever_niet_dagen: [] };
+        await Store.insert('medewerkers', m);
+      } else if (!(m.functies || []).includes(d.functie)) await Store.update('medewerkers', m.id, { functies: [...(m.functies || []), d.functie] });
+      await Store.update('diensten', d.id, { medewerker_id: m.id });
+      A.toast(m.naam + ' (inhuur) staat nu op ' + d.functie, 'ok');
+      return true;
+    }
+    if (keuze === '__open') { await Store.update('diensten', d.id, { medewerker_id: null }); A.toast('Plek is weer open'); return true; }
+    if (keuze.startsWith('__naar:') || keuze.startsWith('__ruil:')) {
+      const doel = A.data.diensten.find(x => x.id === keuze.slice(7)), ander = doel.medewerker_id;
+      await Store.update('diensten', doel.id, { medewerker_id: nu.id });
+      await Store.update('diensten', d.id, { medewerker_id: ander || null });
+      A.toast(`${nu.naam} doet nu ${doel.functie}` + (ander ? `, ${A.mwNaam(ander)} doet ${d.functie}` : ''), 'ok');
+      return true;
+    }
+    const nieuw = A.mw(keuze), elders = zelfde.find(x => x.medewerker_id === keuze);
+    const k = kand.find(x => x.m.id === keuze);
+    if (k && !k.ok && !elders && !await A.bevestig('Past eigenlijk niet', `${nieuw.naam}: ${(k.redenen || []).join(', ') || 'past volgens de planner niet'}. Toch op deze plek zetten?`, 'Toch doen')) return false;
+    if (elders) {
+      // wisselen: wie hier stond gaat naar de andere plek (als die de functie heeft), anders wordt die plek open
+      const mag = nu && (nu.functies || []).includes(elders.functie);
+      if (nu && !mag && !await A.bevestig('Wisselen', `${nu.naam} kan geen ${elders.functie}. ${nieuw.naam} komt op deze plek en de plek ${elders.functie} wordt open. Doorgaan?`, 'Doorgaan')) return false;
+      await Store.update('diensten', elders.id, { medewerker_id: mag ? nu.id : null });
+    }
+    await Store.update('diensten', d.id, { medewerker_id: keuze });
+    A.toast(nieuw.naam + ' staat nu op ' + d.functie, 'ok');
+    return true;
+  }
+
   function groepOpen(lijst) {
     const uit = [], open = new Map();
     for (const x of lijst) {
@@ -1005,7 +1107,7 @@
         return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>${r.aangeboden ? ` <span class="label let">🔁 ${r.overname_door ? esc(A.mwNaam(r.overname_door)) + ' wil overnemen' : 'aangeboden'}</span>` : ''}` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
         <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
-        ${e.status === 'concept' || e.status === 'ingepland' ? `<div class="meta" style="margin-bottom:.4em">${e.status === 'concept' ? '<b>Ingepland, nog niet verstuurd:</b> ' : '<b>Ingepland:</b> '}${A.data.diensten.filter(x => x.event_id === e.id).map(x => esc(x.functie) + ' ' + (x.medewerker_id ? esc(A.mwNaam(x.medewerker_id)) : '<b style="color:var(--fout)">open</b>')).join(' · ')}</div>` : ''}
+        ${e.status === 'concept' || e.status === 'ingepland' ? indelingHtml(e) : ''}
         ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
         ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de uitvraag gaat weer open. Reacties blijven staan.</small></div>' : ''}
         ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
@@ -1090,6 +1192,10 @@
         await A.melding(m.id, `De bevestiging voor ${omschr(ev0)} is ingetrokken. Je opgave "Ik kan" blijft staan; na de termijn wordt het werk verdeeld.`);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
       }));
+      bg.querySelectorAll('[data-wissel]').forEach(k => {
+        const doe = async () => { if (await wisselPlek(k.dataset.wissel)) { bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id)); } };
+        k.onclick = doe; k.onkeydown = ev2 => { if (ev2.key === 'Enter') doe(); };
+      });
       const et = bg.querySelector('#eTerug');
       if (et) et.onclick = () => A.bezig(et, async () => {
         const ev0 = A.event(e.id), vandaag = G.today();
@@ -1277,7 +1383,7 @@
     hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
-        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? ' <span class="label">uit dienst</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : ' <span class="label">uit dienst</span>') : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
         <td>${(m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}</td>
         <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>
