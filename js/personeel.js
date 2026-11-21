@@ -267,8 +267,37 @@
       if (r.naar_id) await A.melding(r.naar_id, `${ik.naam} heeft het ruilverzoek ingetrokken. Er verandert niets aan jouw diensten.`);
       await ververs(); A.toast('Ruilverzoek ingetrokken');
     }));
-    document.querySelectorAll('.keuze3[data-reac] [data-kan]').forEach(k => k.onclick = async () => {
-      const b = k.closest('.keuze3'), e = A.event(b.dataset.reac), kan = k.dataset.kan === '1';
+    // schuif: tikken op een kant, of het bolletje naar links/rechts vegen
+    document.querySelectorAll('.keuze3[data-reac]').forEach(b => {
+      const baan = b.querySelector('.k3-baan'), bol = baan.querySelector('i');
+      let startX = null, startLeft = 0, gesleept = false;
+      baan.addEventListener('pointerdown', ev => { startX = ev.clientX; startLeft = bol.offsetLeft; gesleept = false; try { baan.setPointerCapture(ev.pointerId); } catch (x) { } });
+      baan.addEventListener('pointermove', ev => {
+        if (startX === null) return;
+        const dx = ev.clientX - startX;
+        if (!gesleept && Math.abs(dx) < 6) return;
+        gesleept = true; bol.style.transition = 'none';
+        bol.style.left = Math.max(3, Math.min(baan.clientWidth - bol.offsetWidth - 3, startLeft + dx)) + 'px';
+      });
+      const los = ev => {
+        if (startX === null) return;
+        const dx = ev.clientX - startX; startX = null;
+        bol.style.transition = ''; 
+        if (!gesleept) return;                       // gewoon getikt: dat regelt de klik
+        bol.style.left = '';
+        baan.dataset.negeerKlik = '1'; setTimeout(() => delete baan.dataset.negeerKlik, 350);
+        if (Math.abs(dx) >= 12) kies(b, dx > 0);
+      };
+      baan.addEventListener('pointerup', los);
+      baan.addEventListener('pointercancel', () => { startX = null; bol.style.transition = ''; bol.style.left = ''; });
+    });
+    document.querySelectorAll('.keuze3[data-reac] [data-kan]').forEach(k => k.onclick = () => {
+      const b = k.closest('.keuze3');
+      if (b.querySelector('.k3-baan').dataset.negeerKlik) return;
+      kies(b, k.dataset.kan === '1');
+    });
+    async function kies(b, kan) {
+      const e = A.event(b.dataset.reac);
       const huidig = mijnReactie(e);
       if (huidig && huidig.kan === kan) return;
       b.className = 'keuze3 bezig st-' + (kan ? 'ja' : 'nee');
@@ -283,7 +312,7 @@
       else await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: new Date().toISOString() });
       await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
       } catch (x) { A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
-    });
+    }
     document.querySelectorAll('[data-pak]').forEach(b => b.onclick = () => pakOpen(A.data.diensten.find(d => d.id === b.dataset.pak), b));
     document.querySelectorAll('[data-neem]').forEach(b => b.onclick = () => neemOver(A.data.ruilverzoeken.find(r => r.id === b.dataset.neem), b));
     document.querySelectorAll('[data-weiger]').forEach(b => b.onclick = () => weigerRuil(A.data.ruilverzoeken.find(r => r.id === b.dataset.weiger), b));
