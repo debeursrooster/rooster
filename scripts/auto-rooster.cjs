@@ -69,30 +69,8 @@ async function maakRooster(store) {
   if (uv.herinnerd) console.log(`Herinnering gestuurd aan ${uv.herinnerd} oproepkracht(en).`);
   if (uv.ingepland.length) console.log(`Uitvraag ingepland: ${uv.ingepland.join(', ')} (${uv.open} open).`);
 
-  // 2. Maandrooster
-  const volgende = G.nextMonth(G.monthOf(nu));
-  const vanaf = G.generatieDatum(volgende, ins.dagen_voor_einde);
-  console.log(`Vandaag ${nu}. Rooster ${volgende} wordt gemaakt vanaf ${vanaf}.`);
-
-  if (nu < vanaf) return console.log('Nog niet aan de beurt.');
-  if (data.roosters.some(r => r.maand === volgende)) return console.log('Rooster bestaat al, niets te doen.');
-
-  // Op GitHub is er tijd genoeg: de planner mag hier langer zoeken naar het beste rooster
-  const res = G.generateMonth(volgende, data, { tijd: 30000, iteraties: 400000 });
-  console.log(`Planner: ${res.info.geprobeerd} varianten geprobeerd, ${res.info.verbeterd}x verbeterd, ${res.info.ms} ms.`);
-  await store.insert('diensten', res.diensten);
-  const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
-  const tijd = new Date().toISOString();
-  await store.insert('roosters', { maand: volgende, status, gegenereerd_op: tijd, gepubliceerd_op: status === 'gepubliceerd' ? tijd : null, meldingen: res.meldingen });
-  const [j, m] = volgende.split('-');
-  const maandNaam = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'][+m - 1] + ' ' + j;
-  await store.insert('meldingen', { medewerker_id: null, tekst: `Het rooster voor ${maandNaam} is automatisch gemaakt${status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'}`, gelezen: false, tijd, titel: 'Nieuw rooster ' + maandNaam, link: '#rooster' });
-  if (status === 'gepubliceerd') {
-    data.diensten.push(...res.diensten);
-    data.roosters.push({ maand: volgende, status });
-    const rows = Uitvraag.roosterMeldingen(data, volgende, tijd);
-    if (rows.length) await store.insert('meldingen', rows);
-  }
-  console.log(`Klaar: ${res.diensten.length} diensten, ${res.diensten.filter(d => !d.medewerker_id).length} open.`);
-  res.meldingen.forEach(x => console.log(' - ' + x));
+  // 2. Maandrooster (in twee rondes: voorlopig met vaste krachten, daarna uitvraag cafetaria en definitief)
+  const acties = await Uitvraag.maandAuto(store, data, nu, { planner: { tijd: 30000, iteraties: 400000 } });
+  if (!acties.length) console.log('Maandrooster: niets te doen.');
+  for (const a of acties) console.log(`Maandrooster ${a.maand}: ${a.actie}.`);
 }
