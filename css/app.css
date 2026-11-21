@@ -423,6 +423,7 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .indeling-namen { display: flex; flex-wrap: wrap; gap: .3em; }
 .indeling-naam { display: inline-flex; align-items: center; gap: .35em; background: #faf6ef; border-radius: 99px; padding: .2em .7em; font-size: .88rem; }
 .indeling-naam.open { background: var(--fout-licht); color: var(--fout); font-weight: 700; border: 1px dashed var(--fout); }
+.indeling-naam.baas { background: #fbf1d3; border: 1px dashed #c9a227; }
 @media (max-width: 520px) { .indeling-rij { flex-direction: column; gap: .25em; } .indeling-fn { width: auto; } }
 .indeling-naam.klik { cursor: pointer; }
 .indeling-naam.klik:hover { box-shadow: 0 0 0 2px var(--accent); }
