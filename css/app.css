@@ -415,3 +415,23 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 /* beheer: aantal oproepkrachten dat 'Ik kan' zei bij een open cafetariadienst (voorlopig rooster) */
 .dienst .kanaantal { display: inline-block; background: var(--ok); color: #fff; border-radius: 99px; font-size: .66rem; padding: 0 .4em; margin-left: .2em; font-style: normal; }
 .dienst .kanaantal.nul { background: #b9afa3; }
+/* beheer: overzicht ingeplande personen bij een feest */
+.indeling { background: #fff; border: 1px solid var(--lijn, #eadfce); border-radius: 10px; padding: .6em .8em; margin: .2em 0 .8em; }
+.indeling-kop { display: flex; justify-content: space-between; align-items: center; gap: .6em; flex-wrap: wrap; margin-bottom: .4em; }
+.indeling-rij { display: flex; gap: .6em; padding: .4em 0; border-top: 1px solid #f1e9dd; align-items: flex-start; }
+.indeling-fn { width: 9.5em; flex: none; font-weight: 700; font-size: .9rem; padding-top: .15em; }
+.indeling-namen { display: flex; flex-wrap: wrap; gap: .3em; }
+.indeling-naam { display: inline-flex; align-items: center; gap: .35em; background: #faf6ef; border-radius: 99px; padding: .2em .7em; font-size: .88rem; }
+.indeling-naam.open { background: var(--fout-licht); color: var(--fout); font-weight: 700; border: 1px dashed var(--fout); }
+@media (max-width: 520px) { .indeling-rij { flex-direction: column; gap: .25em; } .indeling-fn { width: auto; } }
+.indeling-naam.klik { cursor: pointer; }
+.indeling-naam.klik:hover { box-shadow: 0 0 0 2px var(--accent); }
+.indeling-naam .potlood { font-size: .75rem; opacity: .55; }
+.wissel-lijst { max-height: 55vh; overflow: auto; display: flex; flex-direction: column; gap: .15em; }
+.wissel-optie { padding: .45em .5em; border-radius: 8px; display: flex; align-items: center; gap: .5em; margin: 0; }
+.wissel-optie:hover { background: #faf6ef; }
+.wissel-optie span { display: inline-flex; align-items: center; gap: .35em; flex-wrap: wrap; }
+.wissel-optie.uit { opacity: .55; }
+.wissel-optie input[type=radio] { width: 18px !important; height: 18px; flex: none; margin: 0; padding: 0; box-shadow: none; }
+.wissel-optie > span { flex: 1; justify-content: flex-start; text-align: left; }
+.inhuur-blok { border-top: 1px solid #f1e9dd; margin-top: .5em; padding-top: .4em; }
