@@ -427,6 +427,8 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 @media (max-width: 520px) { .indeling-rij { flex-direction: column; gap: .25em; } .indeling-fn { width: auto; } }
 .indeling-naam.klik { cursor: pointer; }
 .indeling-naam.klik:hover { box-shadow: 0 0 0 2px var(--accent); }
+.indeling-naam .chip-weg { border: 0; background: transparent; color: var(--fout); font-weight: 700; padding: 0 0 0 .25em; margin: 0; width: auto; min-height: 0; cursor: pointer; font-size: .85rem; line-height: 1; }
+.indeling-naam .chip-weg:hover { transform: scale(1.25); }
 .indeling-naam .potlood { font-size: .75rem; opacity: .55; }
 .wissel-lijst { max-height: 55vh; overflow: auto; display: flex; flex-direction: column; gap: .15em; }
 .wissel-optie { padding: .45em .5em; border-radius: 8px; display: flex; align-items: center; gap: .5em; margin: 0; }
