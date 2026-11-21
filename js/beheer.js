@@ -347,21 +347,38 @@
   function indelingHtml(e) {
     const ds = A.data.diensten.filter(x => x.event_id === e.id)
       .sort((a, b) => a.functie.localeCompare(b.functie) || !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start));
-    const open = ds.filter(x => !x.medewerker_id).length;
+    const open = ds.filter(x => !x.medewerker_id).length, baas = ds.filter(x => A.beheerPlek(x)).length;
+    const dubbelIds = new Set(A.dubbelOpFeest(e.id).flatMap(g => g.ds.map(x => x.id)));
     const fns = [...new Set(ds.map(x => x.functie))];
     const wijzig = e.status === 'concept';
     const tijd = x => (x.start !== e.start || x.eind !== e.eind) ? ` <small class="zacht">${esc(x.start)}–${esc(x.eind)}</small>` : '';
     return `<div class="indeling">
       <div class="indeling-kop"><b>${e.status === 'concept' ? '📝 Ingepland, nog niet verstuurd' : '✅ Ingepland en verstuurd'}</b>
-        <span class="label ${open ? 'fout' : 'ok'}">${ds.length - open} van ${ds.length} ingevuld${open ? ` · ${open} open` : ''}</span></div>
+        <span class="label ${open ? 'fout' : baas ? 'let' : 'ok'}">${ds.length - open - baas} van ${ds.length} personeel${baas ? ` · ${baas}× ${esc(beheerNaam())}` : ''}${open ? ` · ${open} open` : ''}</span></div>
       ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
           <div class="indeling-namen">${rij.map(x => { const m = A.mw(x.medewerker_id);
             const attr = wijzig ? ` data-wissel="${x.id}" role="button" tabindex="0" title="Klik om iemand anders op deze plek te zetten"` : '';
-            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}"${attr}><span class="stip" style="background:${esc(m.kleur)}"></span>${esc(m.naam)}${tijd(x)}${wijzig ? ' <span class="potlood">✎</span>' : ''}</span>`
+            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? '⭐ ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ' <span class="potlood">✎</span>' : ''}</span>`
                      : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
+      ${baas ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">⭐ = ${esc(beheerNaam())} zelf. Die plekken blijven open staan voor het personeel: wie toch kan, kan zo'n plek oppakken.</p>` : ''}
       ${wijzig ? '<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven. Pas na "Versturen naar personeel" krijgt iedereen een melding.</p>' : ''}
     </div>`;
+  }
+
+  // De baas zelf als 'medewerker' (niet actief: geen inlog, geen uitvragen of meldingen), zodat hij zichzelf kan inzetten
+  const beheerNaam = () => A.data.instellingen.beheer_naam || 'Beheer';
+  const beheerMw = () => A.data.medewerkers.find(m => A.isBeheer(m));
+
+  // Waarschuwing als iemand op twee plekken tegelijk staat. true = doorgaan, false = de baas wil het nog wijzigen
+  async function dubbelCheck(evId, knopLabel) {
+    const lijst = A.dubbelOpFeest(evId); if (!lijst.length) return true;
+    const regels = lijst.map(({ m, ds }) => `<li><b>${esc(m ? m.naam : '?')}</b>: ${ds.map(x => esc(x.functie) + ' <small class="zacht">' + esc(x.start) + '–' + esc(x.eind) + '</small>').join(' én ')}</li>`).join('');
+    const baas = lijst.some(g => A.isBeheer(g.m));
+    const keuze = await A.modal('⚠️ Dubbel ingepland', `<p>Op dit feest staat iemand op meer plekken tegelijk:</p><ul style="margin:.3em 0 .6em 1.2em;padding:0">${regels}</ul>
+      ${baas ? `<p class="zacht" style="font-size:.88rem">Klopt dit? Dan doet ${esc(beheerNaam())} wat op dat moment nodig is. Zijn plekken blijven open staan voor het personeel: wie zich alsnog meldt, kan zo'n plek oppakken.</p>` : '<p class="zacht" style="font-size:.88rem">Iemand kan meestal niet twee dingen tegelijk doen. Klopt dit toch?</p>'}`,
+      [{ label: '✎ Wijzigen', waarde: false }, { label: knopLabel || 'Klopt zo', soort: 'primair', waarde: true }]);
+    return !!keuze;
   }
 
   // Iemand anders op een plek van een (nog niet verstuurd) feest zetten, of twee mensen laten wisselen
@@ -379,6 +396,8 @@
       .sort((a, b) => ({ kan: 0, geen: 1, niet: 2 }[a.rc] - { kan: 0, geen: 1, niet: 2 }[b.rc]) || (b.ok - a.ok) || a.m.naam.localeCompare(b.m.naam));
     const optie = (val, html, uit) => `<label class="check wissel-optie${uit ? ' uit' : ''}"><input type="radio" name="wKeuze" value="${val}"> <span>${html}</span></label>`;
     const nu = A.mw(d.medewerker_id);
+    // staat deze persoon op dit feest al op een plek die tegelijk is?
+    const dubbel = m => m && zelfde.find(x => x.medewerker_id === m.id && G.overlap(x, d));
     // Taak wijzigen: wie hier staat naar een andere functie bij hetzelfde feest
     const taak = [], ruilIds = new Set();
     if (nu) for (const f of [...new Set(zelfde.map(x => x.functie))].filter(f => f !== d.functie && (nu.functies || []).includes(f))) {
@@ -397,6 +416,7 @@
         ${nu ? optie('__open', '<b style="color:var(--fout)">Plek leeg maken (open)</b>') : ''}
       </div>
       <div class="inhuur-blok">
+        ${beheerMw() && beheerMw().id === d.medewerker_id ? '' : optie('__beheer', `<b>⭐ ${esc(beheerNaam())} zelf</b>${dubbel(beheerMw()) ? ` <span class="label let">staat al op ${esc(dubbel(beheerMw()).functie)}</span>` : ''} <small class="zacht">– plek blijft open voor personeel</small>`)}
         ${optie('__inhuur', '<b>🧑‍🍳 Iemand inhuren / van buiten</b>')}
         <div class="rij" style="margin:.3em 0 0 1.9em">
           <div class="veld"><label>Naam</label><input id="wInhuurNaam" list="wInhuurLijst" placeholder="bv. Jan (uitzendbureau)"></div>
@@ -412,6 +432,25 @@
         waarde: bg => { inhuur = { naam: bg.querySelector('#wInhuurNaam').value.trim(), tel: bg.querySelector('#wInhuurTel').value.trim() }; return bg.querySelector('input[name=wKeuze]:checked').value; } }],
       bg => { const n = bg.querySelector('#wInhuurNaam'); n.addEventListener('input', () => { bg.querySelector('input[name=wKeuze][value="__inhuur"]').checked = true; }); });
     if (!keuze) return false;
+    if (keuze === '__beheer') {
+      let m = beheerMw();
+      if (!m) {
+        m = { id: Store.uuid(), naam: beheerNaam(), pin: '', telefoon: A.data.instellingen.beheer_telefoon || '', email: '', functies: [d.functie], locaties: ['cafetaria', 'zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 7, kleur: '#c9a227', actief: false, in_dienst_sinds: null, notitie: 'Beheer', liever_niet_dagen: [] };
+        await Store.insert('medewerkers', m);
+      } else if (!(m.functies || []).includes(d.functie)) await Store.update('medewerkers', m.id, { functies: [...(m.functies || []), d.functie] });
+      // staat hij al op een andere plek? de baas mag bewust op twee plekken staan (doet wat nodig is)
+      const al = dubbel(m);
+      let verplaats = false;
+      if (al) {
+        const k = await A.modal('Staat al ingepland', `<p>${esc(m.naam)} staat op dit feest al op <b>${esc(al.functie)}</b>, op hetzelfde moment.</p>`,
+          [{ label: 'Annuleren', waarde: null }, { label: `Verplaatsen (${al.functie} wordt open)`, waarde: 'weg' }, { label: 'Op beide plekken', soort: 'primair', waarde: 'beide' }]);
+        if (!k) return false; verplaats = k === 'weg';
+      }
+      if (verplaats) await Store.update('diensten', al.id, { medewerker_id: null });
+      await Store.update('diensten', d.id, { medewerker_id: m.id });
+      A.toast(m.naam + ' staat nu op ' + d.functie + (verplaats ? ' (plek ' + al.functie + ' is weer open)' : al ? ' én ' + al.functie : ''), 'ok');
+      return true;
+    }
     if (keuze === '__inhuur') {
       // ingehuurde kracht: aparte (niet-actieve) medewerker, zodat hij niet in uitvragen, meldingen of de inlog-lijst komt
       let m = A.data.medewerkers.find(x => /^inhuur/i.test(x.notitie || '') && x.naam.toLowerCase() === inhuur.naam.toLowerCase());
@@ -419,6 +458,9 @@
         m = { id: Store.uuid(), naam: inhuur.naam, pin: '', telefoon: inhuur.tel, email: '', functies: [d.functie], locaties: ['zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 7, kleur: '#8d99ae', actief: false, in_dienst_sinds: null, notitie: 'Inhuur', liever_niet_dagen: [] };
         await Store.insert('medewerkers', m);
       } else if (!(m.functies || []).includes(d.functie)) await Store.update('medewerkers', m.id, { functies: [...(m.functies || []), d.functie] });
+      const al = dubbel(m);
+      if (al && !await A.bevestig('Staat al ingepland', `${m.naam} staat op dit feest al op ${al.functie}, op hetzelfde moment. Verplaatsen naar ${d.functie}? (${al.functie} wordt dan open)`, 'Verplaatsen')) return false;
+      if (al) await Store.update('diensten', al.id, { medewerker_id: null });
       await Store.update('diensten', d.id, { medewerker_id: m.id });
       A.toast(m.naam + ' (inhuur) staat nu op ' + d.functie, 'ok');
       return true;
@@ -1019,6 +1061,7 @@
       <p class="zacht" style="font-size:.85rem">Iets aanpassen? Sluit dit venster en klik in het rooster op een dienst.</p>`;
     const ids = await A.modal('Feesten versturen', html, [{ label: 'Annuleren', waarde: null }, { label: '📤 Versturen', soort: 'ok', waarde: bg => [...bg.querySelectorAll('input:checked')].map(i => i.value) }]);
     if (!ids || !ids.length) return;
+    for (const id of ids) if (!await dubbelCheck(id, '📤 Klopt, versturen')) return eventModal(A.event(id));
     const n = await Uitvraag.publiceerEvents(Store, A.data, A.data.zalen_events.filter(e => ids.includes(e.id)));
     await herlaad(); opnieuw();
     A.toast(`Verstuurd – ${n} melding(en) naar het personeel`, 'ok');
@@ -1162,6 +1205,7 @@
       }
       const ve = bg.querySelector('#eVersturen');
       if (ve) ve.onclick = () => A.bezig(ve, async () => {
+        if (!await dubbelCheck(e.id, '📤 Klopt, versturen')) return;
         const n = await Uitvraag.publiceerEvents(Store, A.data, [A.event(e.id)]);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
         A.toast(`${e.naam} verstuurd – ${n} melding(en)`, 'ok');
@@ -1254,13 +1298,18 @@
         await A.melding(m.id, `De reactietermijn voor ${res.naam} (${A.datumLang(res.datum)}) is nu t/m ${A.datumLang(res.uitvraag_tot)}.`);
       await herlaad(); opnieuw(); A.toast('Opgeslagen', 'ok'); return;
     }
-    const moetHerplannen = nieuw || ev.datum !== res.datum || ev.start !== res.start || ev.eind !== res.eind || JSON.stringify(ev.bezetting) !== JSON.stringify(res.bezetting);
+    // bezetting vergelijken op inhoud (niet op schrijfwijze), anders gaan handmatige wijzigingen in de indeling verloren
+    const bez = b => JSON.stringify((b || []).filter(x => x && x.functie && +x.aantal > 0).map(x => [x.functie, +x.aantal, x.start || '', x.eind || '']).sort());
+    const moetHerplannen = nieuw || ev.datum !== res.datum || ev.start !== res.start || ev.eind !== res.eind || bez(ev.bezetting) !== bez(res.bezetting);
+    if (moetHerplannen && !nieuw && oudeDiensten.some(x => x.medewerker_id) && ['ingepland', 'concept'].includes(res.status)
+      && !await A.bevestig('Indeling opnieuw maken?', 'Je hebt de datum, tijden of bezetting van dit feest veranderd. Daardoor wordt de indeling opnieuw gemaakt en gaan je eigen wijzigingen in de indeling verloren. Doorgaan?', 'Opnieuw indelen')) { opnieuw(); A.toast('Opgeslagen, indeling niet veranderd'); return; }
     const maand = G.monthOf(res.datum);
     if (moetHerplannen && (A.rooster(maand) || oudeDiensten.length || ['ingepland', 'concept'].includes(res.status))) {
       const res2 = await herplanEvent(A.event(res.id), oudeDiensten);
       A.toast(`Opgeslagen – ${res2.n} dienst(en) ingepland${res2.open ? ', ' + res2.open + ' open' : ''}`, res2.open ? '' : 'ok');
     } else A.toast('Opgeslagen', 'ok');
     opnieuw();
+    if (['ingepland', 'concept'].includes(res.status) && !await dubbelCheck(res.id, 'Klopt zo')) eventModal(A.event(res.id));
   }
 
   // Ziet het personeel de diensten van dit feest al?
@@ -1383,7 +1432,7 @@
     hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
-        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : ' <span class="label">uit dienst</span>') : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
         <td>${(m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}</td>
         <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>

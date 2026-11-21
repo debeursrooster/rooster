@@ -126,7 +126,7 @@
   }
   const ruilAanbod = () => A.data.ruilverzoeken.filter(r => r.status === 'open' && r.van_id !== ik.id).map(r => ({ r, d: A.data.diensten.find(x => x.id === r.dienst_id) }))
     .filter(x => x.d && x.d.datum >= G.today() && zichtbaar(x.d) && kanIk(x.d).ok);
-  const openVoorMij = () => A.data.diensten.filter(d => !d.medewerker_id && d.datum >= G.today() && zichtbaar(d) && kanIk(d).ok).sort((a, b) => a.datum.localeCompare(b.datum));
+  const openVoorMij = () => A.data.diensten.filter(d => (!d.medewerker_id || A.beheerPlek(d)) && d.datum >= G.today() && zichtbaar(d) && kanIk(d).ok).sort((a, b) => a.datum.localeCompare(b.datum));
 
   function teken() {
     $('#onderbalk').querySelectorAll('button').forEach(b => b.classList.toggle('actief', b.dataset.t === tab));
@@ -247,7 +247,7 @@
       ${cafMaanden.map(mnd => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">${gs[0].extra ? 'Je vaste diensten staan (grijs) bij Mijn diensten. Wil je extra werken? Zet de schuif naar rechts bij de diensten die je erbij wilt; laat hem staan als je geen extra wilt.' : 'Het voorlopige rooster is gemaakt. Deze diensten zijn nog open. Schuif naar rechts als je kunt, naar links als je niet kunt.'} Kiezen kan t/m <b>${esc(A.datumLang(gs[0].tot))}</b>; daarna wordt het werk eerlijk verdeeld (wie het eerst reageert, krijgt geen voorrang).</p>
         ${gs.map(cafItem).join('')}</div>`; }).join('')}
-      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`)).join('')}</div>` : ''}
+      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ ${esc(A.mwNaam(d.medewerker_id))} vult deze plek nu zelf in – kun jij? Dan neem je hem over</div>` : '')).join('')}</div>` : ''}
       ${!uitvragen.length && !open.length && !caf.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
     koppelActies();
     const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
@@ -476,9 +476,10 @@
     await A.bezig(knop, async () => {
       await A.reload();
       const nu = A.data.diensten.find(x => x.id === d.id);
-      if (!nu || nu.medewerker_id) { A.toast('Deze dienst is al door iemand opgepakt', 'fout'); return ververs(); }
+      if (!nu || (nu.medewerker_id && !A.beheerPlek(nu))) { A.toast('Deze dienst is al door iemand opgepakt', 'fout'); return ververs(); }
+      const vanBaas = !!nu.medewerker_id;
       await Store.update('diensten', d.id, { medewerker_id: ik.id });
-      await A.melding(null, `${ik.naam} heeft de open dienst van ${A.datumLang(d.datum)} ${d.start}–${d.eind} (${d.functie}) opgepakt.`);
+      await A.melding(null, `${ik.naam} heeft de ${vanBaas ? 'plek van ' + A.mwNaam(nu.medewerker_id) : 'open dienst'} van ${A.datumLang(d.datum)} ${d.start}–${d.eind} (${d.functie}) opgepakt.`);
       await ververs(); A.toast('Top, je staat erop!', 'ok');
     });
   }

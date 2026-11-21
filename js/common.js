@@ -22,6 +22,19 @@
   };
 
   App.mw = id => (App.data.medewerkers || []).find(m => m.id === id);
+  // De baas zelf (niet-actieve medewerker met notitie 'Beheer'): zijn plekken blijven open voor personeel
+  App.isBeheer = m => !!m && /^beheer/i.test(m.notitie || '');
+  App.beheerPlek = d => !!d && !!d.medewerker_id && App.isBeheer(App.mw(d.medewerker_id));
+  // Wie staat er bij dit feest op twee (of meer) plekken tegelijk? → [{ m, ds }]
+  App.dubbelOpFeest = evId => {
+    const ds = App.data.diensten.filter(x => x.event_id === evId && x.medewerker_id), uit = [];
+    for (const id of [...new Set(ds.map(x => x.medewerker_id))]) {
+      const eigen = ds.filter(x => x.medewerker_id === id);
+      const botst = eigen.filter(a => eigen.some(b => b !== a && G.overlap(a, b)));
+      if (botst.length) uit.push({ m: App.mw(id), ds: botst });
+    }
+    return uit;
+  };
   App.mwNaam = id => { const m = App.mw(id); return m ? m.naam : 'Open'; };
   App.event = id => (App.data.zalen_events || []).find(e => e.id === id);
   App.rooster = maand => (App.data.roosters || []).find(r => r.maand === maand);
