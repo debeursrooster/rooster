@@ -74,7 +74,9 @@
   const gezienSleutel = () => 'rooster_gezien_' + ik.id;
   const gezien = () => { try { return JSON.parse(localStorage.getItem(gezienSleutel()) || '[]'); } catch (x) { return []; } };
   const zetGezien = evs => { try { localStorage.setItem(gezienSleutel(), JSON.stringify([...new Set([...gezien(), ...evs.map(e => e.id)])].slice(-200))); } catch (x) { } };
-  const nieuweUitvragen = () => mijnUitvragen().filter(e => !mijnReactie(e));
+  const nieuweUitvragen = () => mijnUitvragen().filter(e => !mijnReactie(e)).concat(G.isCafOproep(ik) ? cafGroepen().filter(g => g.kan === null) : []);
+  // eigen diensten uit een voorlopig rooster (nog niet definitief): grijs tonen
+  const mijnVoorlopig = () => A.data.diensten.filter(d => d.medewerker_id === ik.id && !zichtbaar(d) && !d.event_id && (A.rooster(d.maand) || {}).status === 'voorlopig' && d.datum >= G.today());
   // Bevestigde feestplekken (nog geen echte dienst) die je kunt aanbieden of overnemen
   const evOpen = e => e && e.status === 'open' && e.datum >= G.today();
   const mijnBevestigd = () => A.data.event_reacties.filter(r => r.medewerker_id === ik.id && r.kan && r.bevestigd_functie && evOpen(A.event(r.event_id)))
@@ -84,6 +86,32 @@
     .filter(({ r, e }) => (ik.functies || []).includes(r.bevestigd_functie) && G.uitvraagGroep(e, A.data).some(m => m.id === ik.id) && !(mijnReactie(e) || {}).bevestigd_functie)
     .sort((a, b) => a.e.datum.localeCompare(b.e.datum));
   const feestOmschr = (e, f) => A.feestOmschr(e, f);
+  // ---- uitvraag cafetaria (voorlopig maandrooster) ----
+  const knopSchuif = (attr, st, label) => `<div class="keuze3-wrap"><div class="keuze3 st-${st}" ${attr} role="group" aria-label="${label}">
+      <button type="button" class="k3-tekst nee" data-kan="0">Kan niet</button>
+      <span class="k3-baan"><button type="button" class="k3-helft" data-kan="0" aria-label="Kan niet"></button><button type="button" class="k3-helft" data-kan="1" aria-label="Ik kan"></button><i></i></span>
+      <button type="button" class="k3-tekst ja" data-kan="1">Ik kan</button></div>
+      ${st === 'leeg' ? '<small class="k3-hint">Nog niet gekozen</small>' : ''}</div>`;
+  // open cafetariadiensten waar ik op kan reageren, samengevoegd per dag/tijd/functie
+  function cafGroepen() {
+    if (!ik || !(ik.locaties || []).includes('cafetaria')) return [];
+    const nu = G.today();
+    const rs = A.data.roosters.filter(r => Uitvraag.cafMagReageren(ik, r) && (!r.uitvraag_tot || r.uitvraag_tot >= nu));
+    const uit = [], per = new Map();
+    for (const r of rs) for (const d of Uitvraag.cafOpen(A.data, r.maand).filter(d => d.datum >= nu && G.cafPast(ik, d))) {
+      const k = [d.datum, d.start, d.eind, d.functie].join('|');
+      if (!per.has(k)) {
+        // vaste krachten in ronde 1 kiezen vóór ronde 2; daarna geldt voor iedereen de gewone termijn
+        const pl = Uitvraag.maandPlanning(A.data, r.maand);
+        const tot = !G.isCafOproep(ik) && (+r.ronde || 1) < 2 && pl.ronde2 ? G.addDays(pl.ronde2, -1) : r.uitvraag_tot;
+        const g = { d, ids: [], tot, maand: r.maand, extra: !G.isCafOproep(ik) }; per.set(k, g); uit.push(g);
+      }
+      per.get(k).ids.push(d.id);
+    }
+    uit.sort((a, b) => a.d.datum.localeCompare(b.d.datum) || G.min(a.d.start) - G.min(b.d.start));
+    for (const g of uit) { const r = A.data.event_reacties.find(x => x.dienst_id && g.ids.includes(x.dienst_id) && x.medewerker_id === ik.id); g.kan = r ? r.kan : null; }
+    return uit;
+  }
   const mijnReactie = e => A.data.event_reacties.find(r => r.event_id === e.id && r.medewerker_id === ik.id);
   const mijnDiensten = () => A.data.diensten.filter(d => d.medewerker_id === ik.id && zichtbaar(d)).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
   const tijd = d => esc(d.start) + '–' + esc(d.eind);
@@ -168,13 +196,21 @@
         <div class="meta">${esc(A.datumLang(e.datum))} · 🎉 ${esc(e.naam)}</div>
         <div class="meta">${bev ? `<b style="color:var(--ok)">✓ Bevestigd</b>${bev !== 'bevestigd' ? ' · ' + esc(bev) : ''}` : '⏳ Jij kunt – nog niet bevestigd'}</div>
         ${bev && (mijnReactie(e) || {}).aangeboden ? '<div class="meta" style="color:var(--let)">🔁 Aangeboden om te ruilen</div>' : ''}</div></div>` }; })
+      ,...mijnVoorlopig().map(d => ({ datum: d.datum, start: d.start, html: `<div class="item onbevestigd"><div class="datumblok ${d.locatie === 'zalen' ? 'zalen' : 'cafetaria'}"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${esc(d.start)}–${esc(d.eind)} <span class="label ${d.locatie === 'zalen' ? 'zaal' : 'caf'}">${A.LOC[d.locatie]}</span></div>
+        <div class="meta">${esc(A.datumLang(d.datum))} · ${esc(d.functie)}</div>
+        <div class="meta">⏳ Voorlopig ingepland – rooster nog niet definitief</div></div></div>` }))
+      ,...cafGroepen().filter(g => g.kan === true).map(({ d }) => ({ datum: d.datum, start: d.start, html: `<div class="item onbevestigd"><div class="datumblok cafetaria"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${esc(d.start)}–${esc(d.eind)} <span class="label caf">${A.LOC.cafetaria}</span></div>
+        <div class="meta">${esc(A.datumLang(d.datum))} · ${esc(d.functie)}</div>
+        <div class="meta">⏳ Jij kunt – nog niet bevestigd</div></div></div>` }))
     ].sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start));
     const perMaand = {};
     regels.forEach(r => (perMaand[r.datum.slice(0, 7)] = perMaand[r.datum.slice(0, 7)] || []).push(r.html));
     $('#mijnInhoud').innerHTML = `
       ${berichten.length ? `<div class="paneel"><div class="paneel-kop"><h3>📌 Prikbord</h3></div>${berichten.map(b => `<div class="bericht ${b.belangrijk ? 'belangrijk' : ''}"><h4>${esc(b.titel)}</h4><p style="white-space:pre-wrap;margin:0">${esc(b.tekst)}</p><small class="zacht">${A.tijdGeleden(b.geplaatst)}</small></div>`).join('')}</div>` : ''}
       <div class="paneel"><div class="paneel-kop"><h3>Mijn diensten</h3>${komend.length ? '<button class="knop klein" id="agenda">📲 In mijn agenda</button>' : ''}</div>
-        ${regels.some(r => r.html.includes('onbevestigd')) ? '<p class="zacht" style="font-size:.82rem;margin:-.2em 0 .3em">Grijs = je hebt aangegeven dat je kunt, maar het is nog niet bevestigd.</p>' : ''}
+        ${regels.some(r => r.html.includes('onbevestigd')) ? '<p class="zacht" style="font-size:.82rem;margin:-.2em 0 .3em">Grijs = voorlopig of door jou opgegeven, nog niet definitief.</p>' : ''}
         ${concept ? `<p class="zacht" style="font-size:.88rem">Het rooster voor ${esc(A.maandNaam(concept.maand))} wordt nog gemaakt.</p>` : ''}
         ${regels.length ? Object.keys(perMaand).sort().map(m => `<h4 style="text-transform:capitalize;margin:.8em 0 .3em;color:var(--zacht);font-size:.85rem">${esc(A.maandNaam(m))}</h4>${perMaand[m].join('')}`).join('')
           : '<div class="leeg"><span class="groot">🛋️</span>Geen diensten gepland<br><a href="#" id="naarBeschikbaar">Bekijk de beschikbare diensten</a></div>'}
@@ -184,7 +220,12 @@
 
   // Feesten waarvoor gevraagd wordt wie kan + open diensten die ik kan oppakken
   function tBeschikbaar() {
-    const open = openVoorMij(), uitvragen = mijnUitvragen();
+    const open = openVoorMij(), uitvragen = mijnUitvragen(), caf = cafGroepen();
+    const cafItem = g => { const d = g.d;
+      return `<div class="item" style="flex-wrap:wrap"><div class="datumblok cafetaria"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
+        <div style="flex:1;min-width:150px"><div class="wie">${esc(d.start)}–${esc(d.eind)} · ${esc(d.functie)}</div><div class="meta">${esc(A.datumLang(d.datum))}${g.ids.length > 1 ? ` · ${g.ids.length} plekken` : ''}</div></div>
+        ${knopSchuif(`data-dreac="${g.ids.join(',')}"`, g.kan === null ? 'leeg' : g.kan ? 'ja' : 'nee', 'Kun je op ' + esc(A.datumKort(d.datum)) + ' ' + esc(d.start))}</div>`; };
+    const cafMaanden = [...new Set(caf.map(g => g.maand))];
     const uitvraagItem = e => { const r = mijnReactie(e); const fns = [...new Set((e.bezetting || []).map(b => b.functie))].filter(f => (ik.functies || []).includes(f));
       return `<div class="item" style="flex-wrap:wrap"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
         <div style="flex:1;min-width:150px"><div class="wie">${esc(e.naam)}</div><div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)}${fns.length ? ' · ' + fns.map(esc).join('/') : ''}</div>
@@ -203,11 +244,14 @@
       ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Schuif naar rechts (groen) als je kunt, naar links (rood) als je niet kunt. Kun je, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
         ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
+      ${cafMaanden.map(mnd => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
+        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">${gs[0].extra ? 'Je vaste diensten staan (grijs) bij Mijn diensten. Wil je extra werken? Zet de schuif naar rechts bij de diensten die je erbij wilt; laat hem staan als je geen extra wilt.' : 'Het voorlopige rooster is gemaakt. Deze diensten zijn nog open. Schuif naar rechts als je kunt, naar links als je niet kunt.'} Kiezen kan t/m <b>${esc(A.datumLang(gs[0].tot))}</b>; daarna wordt het werk eerlijk verdeeld (wie het eerst reageert, krijgt geen voorrang).</p>
+        ${gs.map(cafItem).join('')}</div>`; }).join('')}
       ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`)).join('')}</div>` : ''}
-      ${!uitvragen.length && !open.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
+      ${!uitvragen.length && !open.length && !caf.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
     koppelActies();
     const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
-    if (mb) { const n = open.length; mb.textContent = n; mb.classList.toggle('verborgen', !n); }
+    if (mb) { const n = open.length + nieuweUitvragen().length; mb.textContent = n; mb.classList.toggle('verborgen', !n); }
   }
 
   // ---------------- ziek melden ----------------
@@ -268,7 +312,7 @@
       await ververs(); A.toast('Ruilverzoek ingetrokken');
     }));
     // schuif: tikken op een kant, of het bolletje naar links/rechts vegen
-    document.querySelectorAll('.keuze3[data-reac]').forEach(b => {
+    document.querySelectorAll('.keuze3[data-reac], .keuze3[data-dreac]').forEach(b => {
       const baan = b.querySelector('.k3-baan'), bol = baan.querySelector('i');
       let startX = null, startLeft = 0, gesleept = false;
       baan.addEventListener('pointerdown', ev => { startX = ev.clientX; startLeft = bol.offsetLeft; gesleept = false; try { baan.setPointerCapture(ev.pointerId); } catch (x) { } });
@@ -291,12 +335,13 @@
       baan.addEventListener('pointerup', los);
       baan.addEventListener('pointercancel', () => { startX = null; bol.style.transition = ''; bol.style.left = ''; });
     });
-    document.querySelectorAll('.keuze3[data-reac] [data-kan]').forEach(k => k.onclick = () => {
+    document.querySelectorAll('.keuze3[data-reac] [data-kan], .keuze3[data-dreac] [data-kan]').forEach(k => k.onclick = () => {
       const b = k.closest('.keuze3');
       if (b.querySelector('.k3-baan').dataset.negeerKlik) return;
       kies(b, k.dataset.kan === '1');
     });
     async function kies(b, kan) {
+      if (b.dataset.dreac) return cafKies(b, kan);
       const e = A.event(b.dataset.reac);
       const huidig = mijnReactie(e);
       if (huidig && huidig.kan === kan) return;
@@ -312,6 +357,23 @@
       else await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: new Date().toISOString() });
       await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
       } catch (x) { A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
+    }
+    async function cafKies(b, kan) {
+      const ids = b.dataset.dreac.split(',');
+      b.className = 'keuze3 bezig st-' + (kan ? 'ja' : 'nee');
+      const hint = b.parentNode.querySelector('.k3-hint'); if (hint) hint.remove();
+      try {
+        await A.reload();
+        const r = A.data.roosters.find(r => r.status === 'voorlopig' && Uitvraag.cafOpen(A.data, r.maand).some(d => ids.includes(d.id)));
+        if (!r || (r.uitvraag_tot && r.uitvraag_tot < G.today())) { A.toast('De termijn is al voorbij', 'fout'); return ververs(); }
+        const tijdNu = new Date().toISOString();
+        for (const id of ids) {
+          const bestaand = A.data.event_reacties.find(x => x.dienst_id === id && x.medewerker_id === ik.id);
+          if (bestaand) { if (bestaand.kan !== kan) await Store.update('event_reacties', bestaand.id, { kan, tijd: tijdNu }); }
+          else await Store.insert('event_reacties', { event_id: null, dienst_id: id, medewerker_id: ik.id, kan, opmerking: '', tijd: tijdNu });
+        }
+        await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
+      } catch (x) { console.error(x); A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
     }
     document.querySelectorAll('[data-pak]').forEach(b => b.onclick = () => pakOpen(A.data.diensten.find(d => d.id === b.dataset.pak), b));
     document.querySelectorAll('[data-neem]').forEach(b => b.onclick = () => neemOver(A.data.ruilverzoeken.find(r => r.id === b.dataset.neem), b));

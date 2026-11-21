@@ -124,6 +124,184 @@
     return uit;
   };
 
+  // =====================================================================
+  //  Maandrooster cafetaria in stappen (D = dag van het definitieve rooster)
+  //  Ronde 1 (D-21): voorlopig rooster met vaste krachten (contracturen of vaste werkdagen).
+  //                  Zij zien hun diensten (grijs) en kunnen bij Beschikbaar extra diensten kiezen.
+  //  Ronde 2 (D-14): extra diensten naar vaste krachten die 'Ik kan' zeiden; wat open blijft
+  //                  gaat ook naar de oproepkrachten.
+  //  Ronde 3 (D-2) : oproepkrachten die 'Ik kan' zeiden inplannen; herinnering aan beide groepen
+  //                  met de diensten die dan nog open staan.
+  //  Definitief (D): laatste reacties verwerken; vaste krachten en oproepkrachten tellen dan gelijk.
+  // =====================================================================
+  const getal = (v, std) => (v === 0 || v === '0') ? 0 : (+v || std);
+  U.cafDagen = data => getal((data.instellingen || {}).caf_uitvraag_dagen, 14);
+  U.maandPlanning = function (data, maand) {
+    const ins = data.instellingen || {};
+    const D = G.generatieDatum(maand, ins.dagen_voor_einde);
+    const d2 = U.cafDagen(data);
+    if (!d2) return { definitief: D, aan: false };
+    const d1 = Math.max(getal(ins.caf_ronde1_dagen, 21), d2), d3 = Math.min(getal(ins.caf_ronde3_dagen, 2), d2);
+    return { aan: true, definitief: D, ronde1: G.addDays(D, -d1), ronde2: G.addDays(D, -d2), ronde3: d3 ? G.addDays(D, -d3) : null, reagerenTot: G.addDays(D, -1),
+      voorlopig: G.addDays(D, -d1) };
+  };
+  U.cafOpen = (data, maand) => (data.diensten || []).filter(d => d.maand === maand && d.locatie === 'cafetaria' && !d.medewerker_id);
+  U.cafVast = data => (data.medewerkers || []).filter(m => m.actief !== false && !G.isCafOproep(m) && (m.locaties || []).includes('cafetaria'));
+  // Wie mag in deze ronde reageren op open cafetariadiensten?
+  U.cafMagReageren = (m, r) => !!r && r.status === 'voorlopig' && (m.locaties || []).includes('cafetaria') && (!G.isCafOproep(m) || (+r.ronde || 1) >= 2);
+
+  const rondeMelding = (tijd, tekst, extra) => ({ medewerker_id: null, tekst, gelezen: false, tijd, ...(extra || {}) });
+  const urenVan = ds => uren(ds.reduce((t, d) => t + G.hours(d.start, d.eind), 0));
+  const zetRooster = async (store, r, upd) => { await store.update('roosters', r.id, upd); Object.assign(r, upd); };
+
+  // open diensten aan wie 'Ik kan' zei geven (in data én in de database)
+  async function verdeel(store, data, maand, fase, opties) {
+    const res = G.cafVerdeel(maand, data, fase, opties && opties.planner);
+    const gekregen = res.diensten.filter(d => d.medewerker_id);
+    for (const d of gekregen) {
+      await store.update('diensten', d.id, { medewerker_id: d.medewerker_id });
+      const oud = (data.diensten || []).find(x => x.id === d.id); if (oud) oud.medewerker_id = d.medewerker_id;
+    }
+    return { gekregen, meldingen: (res.meldingen || []).filter(x => x.startsWith('Geen geschikte')) };
+  }
+  // persoonlijke melding: 'je bent voorlopig ingepland voor deze extra diensten'
+  function kregenMeldingen(gekregen, maand, tijd, soort) {
+    const per = {};
+    for (const d of gekregen) (per[d.medewerker_id] = per[d.medewerker_id] || []).push(d);
+    return Object.entries(per).map(([mid, ds]) => ({ medewerker_id: mid, gelezen: false, tijd, titel: 'Voorlopig ingepland',
+      tekst: `✅ Je bent voorlopig ingepland voor ${ds.length} ${soort ? soort + ' ' : ''}cafetariadienst(en) in ${maandNaam(maand)}: ` + ds.sort((a, b) => a.datum.localeCompare(b.datum)).map(d => `${datumTekst(d.datum)} ${d.start}–${d.eind}`).join('; ') + '. Het rooster wordt nog definitief gemaakt.' }));
+  }
+  // herinnering/oproep: per persoon het aantal open diensten dat bij hem past en waar hij nog niet op reageerde
+  function openMeldingen(data, maand, mensen, tijd, tekst) {
+    const open = U.cafOpen(data, maand), rows = [];
+    for (const m of mensen) {
+      const passend = open.filter(d => G.cafPast(m, d));
+      const zonder = passend.filter(d => !(data.event_reacties || []).some(x => x.dienst_id === d.id && x.medewerker_id === m.id));
+      if (zonder.length) rows.push({ medewerker_id: m.id, gelezen: false, tijd, titel: 'Open diensten ' + maandNaam(maand), tekst: tekst(zonder.length, passend.length) });
+    }
+    return rows;
+  }
+
+  // Ronde 1: voorlopig rooster met de vaste krachten
+  U.cafVoorlopig = async function (store, data, maand, opties) {
+    opties = opties || {};
+    const tijd = new Date().toISOString(), plan = U.maandPlanning(data, maand);
+    const res = G.generateVoorlopig(maand, data, opties.planner);
+    await store.insert('diensten', res.diensten);
+    data.diensten = (data.diensten || []).concat(res.diensten);
+    const rec = { maand, status: 'voorlopig', ronde: 1, gegenereerd_op: tijd, gepubliceerd_op: null, meldingen: res.meldingen, uitvraag_tot: plan.reagerenTot, herinnerd: false };
+    await store.insert('roosters', rec);
+    (data.roosters = data.roosters || []).push(rec);
+    const open = U.cafOpen(data, maand);
+    const rows = [rondeMelding(tijd, `Voorlopig rooster ${maandNaam(maand)} gemaakt: de vaste krachten zijn ingepland en zien hun diensten al (grijs). ${open.length} cafetariadienst(en) staan open; vaste krachten kunnen nu extra diensten kiezen, vanaf ${datumTekst(plan.ronde2)} ook de oproepkrachten.`, { titel: 'Voorlopig rooster ' + maandNaam(maand), link: '#rooster' })];
+    for (const m of U.cafVast(data)) {
+      const mijn = res.diensten.filter(d => d.medewerker_id === m.id && d.locatie === 'cafetaria');
+      const extra = open.filter(d => G.cafPast(m, d)).length;
+      if (!mijn.length && !extra) continue;
+      rows.push({ medewerker_id: m.id, gelezen: false, tijd, titel: 'Voorlopig rooster ' + maandNaam(maand),
+        tekst: `📅 Voorlopig rooster ${maandNaam(maand)}: ${mijn.length ? `je staat ${mijn.length}× ingepland (${urenVan(mijn)} uur), zie Mijn diensten.` : 'je staat nog niet ingepland.'}${extra ? ` Wil je extra werken? Er staan ${extra} open dienst(en) bij Beschikbaar; kies vóór ${datumTekst(plan.ronde2)}.` : ''}` });
+    }
+    await store.insert('meldingen', rows);
+    return { open: open.length };
+  };
+
+  // Ronde 2: extra diensten naar vaste krachten, daarna uitvraag oproepkrachten
+  U.cafRonde2 = async function (store, data, maand, opties) {
+    const tijd = new Date().toISOString(), r = (data.roosters || []).find(r => r.maand === maand), plan = U.maandPlanning(data, maand);
+    const v = await verdeel(store, data, maand, 'extra', opties);
+    await zetRooster(store, r, { ronde: 2 });
+    const open = U.cafOpen(data, maand);
+    const rows = kregenMeldingen(v.gekregen, maand, tijd, 'extra');
+    rows.push(rondeMelding(tijd, `Rooster ${maandNaam(maand)}: ${v.gekregen.length} extra dienst(en) naar vaste krachten. ${open.length} cafetariadienst(en) staan nog open en zijn nu ook uitgezet bij de oproepkrachten (reageren t/m ${datumTekst(r.uitvraag_tot || plan.reagerenTot)}).`, { titel: 'Rooster ' + maandNaam(maand) + ': oproepkrachten', link: '#rooster' }));
+    rows.push(...openMeldingen(data, maand, G.cafOproepGroep(data), tijd, n => `☕ Er staan ${n} open cafetariadienst(en) voor ${maandNaam(maand)}. Geef bij Beschikbaar aan welke je kunt, uiterlijk ${datumTekst(r.uitvraag_tot || plan.reagerenTot)}.`));
+    await store.insert('meldingen', rows);
+    return { gekregen: v.gekregen.length, open: open.length };
+  };
+
+  // Ronde 3: oproepkrachten inplannen, herinnering aan iedereen voor wat nog open is
+  U.cafRonde3 = async function (store, data, maand, opties) {
+    const tijd = new Date().toISOString(), r = (data.roosters || []).find(r => r.maand === maand), plan = U.maandPlanning(data, maand);
+    const a = await verdeel(store, data, maand, 'oproep', opties);
+    const b = await verdeel(store, data, maand, 'extra', opties);
+    await zetRooster(store, r, { ronde: 3, herinnerd: true });
+    const open = U.cafOpen(data, maand), tot = r.uitvraag_tot || plan.reagerenTot;
+    const rows = kregenMeldingen(a.gekregen.concat(b.gekregen), maand, tijd, '');
+    rows.push(rondeMelding(tijd, `Rooster ${maandNaam(maand)}: ${a.gekregen.length + b.gekregen.length} dienst(en) voorlopig ingevuld. ${open.length ? `Nog ${open.length} open; iedereen heeft een herinnering gekregen.` : 'Alles is ingevuld.'} Op ${datumTekst(plan.definitief)} wordt het definitief.`, { titel: 'Rooster ' + maandNaam(maand) + ': bijna definitief', link: '#rooster' }));
+    if (open.length) rows.push(...openMeldingen(data, maand, G.cafOproepGroep(data).concat(U.cafVast(data)), tijd, n => `⏰ Er staan nog ${n} open cafetariadienst(en) voor ${maandNaam(maand)} waar jij nog niet op hebt gereageerd. Kun je er nog één? Kies bij Beschikbaar, uiterlijk ${datumTekst(tot)}.`));
+    await store.insert('meldingen', rows);
+    return { gekregen: a.gekregen.length + b.gekregen.length, open: open.length };
+  };
+
+  // Definitief: laatste reacties (vaste krachten en oproepkrachten gelijk) en versturen
+  U.cafDefinitief = async function (store, data, maand, opties) {
+    const tijd = new Date().toISOString(), r = (data.roosters || []).find(r => r.maand === maand);
+    const a = { gekregen: [] };
+    const b = await verdeel(store, data, maand, 'alle', opties);
+    const ins = data.instellingen || {};
+    const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
+    const meld = (r && r.meldingen || []).filter(x => !x.startsWith('Geen geschikte')).concat(b.meldingen);
+    if (r) await zetRooster(store, r, { status, gepubliceerd_op: status === 'gepubliceerd' ? tijd : null, meldingen: meld });
+    const nogOpen = U.cafOpen(data, maand).length, gevuld = a.gekregen.length + b.gekregen.length;
+    const rows = [rondeMelding(tijd, `Rooster ${maandNaam(maand)} is definitief gemaakt${gevuld ? ` (${gevuld} dienst(en) nog verdeeld)` : ''}${nogOpen ? `; ${nogOpen} dienst(en) nog open` : ''}.` + (status === 'concept' ? ' Het staat klaar om te controleren en te versturen.' : ' Het is verstuurd.'), { titel: 'Rooster ' + maandNaam(maand) + ' definitief', link: '#rooster' })];
+    if (status === 'gepubliceerd') {
+      rows.push(...U.roosterMeldingen(data, maand, tijd));
+      const kreeg = new Set((data.diensten || []).filter(d => d.maand === maand && d.medewerker_id).map(d => d.medewerker_id));
+      const ids = new Set((data.diensten || []).filter(d => d.maand === maand && d.locatie === 'cafetaria').map(d => d.id));
+      const zeiKan = new Set((data.event_reacties || []).filter(x => x.dienst_id && ids.has(x.dienst_id) && x.kan).map(x => x.medewerker_id));
+      for (const mid of zeiKan) if (!kreeg.has(mid)) rows.push({ medewerker_id: mid, gelezen: false, tijd, tekst: `Bedankt voor je reactie! Voor ${maandNaam(maand)} ben je in de cafetaria deze keer niet nodig.` });
+    }
+    await store.insert('meldingen', rows);
+    return { gevuld, open: nogOpen, status };
+  };
+
+  // Volgende stap uitvoeren als die aan de beurt is (meerdere stappen achter elkaar mag, bv. bij een late start)
+  U.cafStap = async function (store, data, maand, vandaag, opties) {
+    const plan = U.maandPlanning(data, maand), r = (data.roosters || []).find(r => r.maand === maand);
+    if (!r || r.status !== 'voorlopig') return null;
+    const ronde = +r.ronde || 1;
+    if (vandaag >= plan.definitief) { await U.cafDefinitief(store, data, maand, opties); return 'definitief'; }
+    if (ronde < 2 && vandaag >= plan.ronde2) { await U.cafRonde2(store, data, maand, opties); return 'ronde 2'; }
+    if (ronde < 3 && ronde >= 2 && plan.ronde3 && vandaag >= plan.ronde3) { await U.cafRonde3(store, data, maand, opties); return 'ronde 3'; }
+    return null;
+  };
+
+  // Automatisch: kijk voor de komende twee maanden of er iets te doen is
+  U.maandAuto = async function (store, data, vandaag, opties) {
+    vandaag = vandaag || G.today();
+    const uit = [];
+    const eerste = G.nextMonth(G.monthOf(vandaag));
+    for (const maand of [eerste, G.nextMonth(eerste)]) {
+      const plan = U.maandPlanning(data, maand);
+      let r = (data.roosters || []).find(r => r.maand === maand);
+      if (!r) {
+        if (plan.aan && vandaag >= plan.ronde1 && vandaag < plan.definitief) {
+          await U.cafVoorlopig(store, data, maand, opties);
+          uit.push({ maand, actie: 'voorlopig' });
+        } else if (vandaag >= plan.definitief) {
+          // geen tijd (meer) voor de rondes: in één keer het hele rooster maken
+          const res = G.generateMonth(maand, data, opties && opties.planner);
+          await store.insert('diensten', res.diensten);
+          data.diensten = (data.diensten || []).concat(res.diensten);
+          const tijd = new Date().toISOString(), ins = data.instellingen || {};
+          const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
+          const rec = { maand, status, gegenereerd_op: tijd, gepubliceerd_op: status === 'gepubliceerd' ? tijd : null, meldingen: res.meldingen };
+          await store.insert('roosters', rec); (data.roosters = data.roosters || []).push(rec);
+          const rows = [rondeMelding(tijd, `Het rooster voor ${maandNaam(maand)} is automatisch gemaakt${status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'}`, { titel: 'Nieuw rooster ' + maandNaam(maand), link: '#rooster' })];
+          if (status === 'gepubliceerd') rows.push(...U.roosterMeldingen(data, maand, tijd));
+          await store.insert('meldingen', rows);
+          uit.push({ maand, actie: 'gemaakt' });
+        }
+      }
+      // daarna eventueel meteen door naar de volgende stap(pen)
+      for (let i = 0; i < 3; i++) {
+        const stap = await U.cafStap(store, data, maand, vandaag, opties);
+        if (!stap) break;
+        uit.push({ maand, actie: stap });
+      }
+    }
+    return uit;
+  };
+
   root.Uitvraag = U;
   if (typeof module !== 'undefined') module.exports = U;
 })(typeof window !== 'undefined' ? window : globalThis);

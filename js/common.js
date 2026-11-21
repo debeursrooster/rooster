@@ -170,21 +170,11 @@
     return res;
   };
 
+  // Maandrooster automatisch: voorlopig (cafetaria-uitvraag), herinnering, definitief – zie Uitvraag.maandAuto
   App.autoRooster = async function () {
-    const ins = App.data.instellingen;
-    const nu = G.today();
-    const volgende = G.nextMonth(G.monthOf(nu));
-    const vanaf = G.generatieDatum(volgende, ins.dagen_voor_einde);
-    if (nu < vanaf || App.rooster(volgende)) return null;
-    const res = G.generateMonth(volgende, App.data);
-    await Store.insert('diensten', res.diensten);
-    const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
-    await Store.insert('roosters', { maand: volgende, status, gegenereerd_op: new Date().toISOString(), gepubliceerd_op: status === 'gepubliceerd' ? new Date().toISOString() : null, meldingen: res.meldingen });
-    await App.melding(null, 'Het rooster voor ' + App.maandNaam(volgende) + ' is automatisch gemaakt' + (status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'), { titel: 'Nieuw rooster ' + App.maandNaam(volgende), link: '#rooster' });
-    await App.reload();
-    if (status === 'gepubliceerd') await App.meldRooster(volgende);
-    await App.reload();
-    return volgende;
+    const res = await Uitvraag.maandAuto(Store, App.data, G.today());
+    if (res.length) await App.reload();
+    return res;
   };
 
   // ---------- demo-gegevens ----------

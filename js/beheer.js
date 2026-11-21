@@ -52,8 +52,9 @@
     $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam;
     const uv = await A.verwerkUitvragen();
     if (uv.ingepland.length) A.toast('Uitvraag afgerond: ' + uv.ingepland.join(', ') + (uv.teControleren ? ' – controleer en verstuur' : ' ingepland'), 'ok');
-    const gemaakt = await A.autoRooster();
-    if (gemaakt) A.toast('Rooster voor ' + A.maandNaam(gemaakt) + ' is automatisch gemaakt', 'ok');
+    const acties = await A.autoRooster();
+    const tekst = { gemaakt: 'automatisch gemaakt', voorlopig: 'voorlopig gemaakt – oproepkrachten kunnen nu reageren', definitief: 'definitief gemaakt' };
+    for (const x of acties.filter(x => tekst[x.actie])) A.toast('Rooster ' + A.maandNaam(x.maand) + ' ' + tekst[x.actie], 'ok');
     window.addEventListener('hashchange', route);
     route();
   }
@@ -116,7 +117,9 @@
     const rv = A.rooster(volgende);
     const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
     let roosterTekst, roosterSub;
-    if (!rv) { roosterTekst = 'Nog niet'; roosterSub = 'wordt gemaakt op ' + A.datumKort(genDatum); }
+    const pl = Uitvraag.maandPlanning(d, volgende);
+    if (!rv) { roosterTekst = 'Nog niet'; roosterSub = pl.voorlopig && pl.voorlopig >= nu ? 'voorlopig op ' + A.datumKort(pl.voorlopig) : 'wordt gemaakt op ' + A.datumKort(genDatum); }
+    else if (rv.status === 'voorlopig') { roosterTekst = 'Voorlopig'; roosterSub = 'definitief op ' + A.datumKort(pl.definitief); }
     else if (rv.status === 'concept') { roosterTekst = 'Concept'; roosterSub = 'klaar om te controleren'; }
     else { roosterTekst = 'Online'; roosterSub = 'gepubliceerd'; }
 
@@ -185,10 +188,24 @@
     const vlZin = vlo ? ` <b class="fout-tekst">Feesten met lopende uitvraag: voorlopig ${vlo} open.</b>` : '';
 
     let status;
+    const pl = Uitvraag.maandPlanning(d, maand);
     if (!r) {
-      const gd = G.generatieDatum(maand, d.instellingen.dagen_voor_einde);
-      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
-        <div class="acties"><button class="knop primair" id="maakRooster">✨ Rooster nu maken</button></div></div>`;
+      const gd = pl.definitief;
+      const tweeRondes = pl.aan && gd > nu;
+      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${tweeRondes ? `Planning: <b>${esc(A.datumKort(pl.ronde1 < nu ? nu : pl.ronde1))}</b> voorlopig rooster vaste krachten (zij kunnen extra diensten kiezen) · <b>${esc(A.datumKort(pl.ronde2))}</b> extra diensten toekennen, rest naar oproepkrachten${pl.ronde3 ? ` · <b>${esc(A.datumKort(pl.ronde3))}</b> oproepkrachten inplannen + herinnering` : ''} · <b>${esc(A.datumKort(gd))}</b> definitief.` : gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
+        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Voorlopig rooster nu maken</button><button class="knop klein" id="maakRooster">Meteen definitief maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}</div></div>`;
+    } else if (r.status === 'voorlopig') {
+      const cafOpen = Uitvraag.cafOpen(d, maand), ids = new Set(cafOpen.map(x => x.id));
+      const groep = G.cafOproepGroep(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
+      const reageerden = groep.filter(m => d.event_reacties.some(x => x.dienst_id && ids.has(x.dienst_id) && x.medewerker_id === m.id)).length;
+      const ronde = +r.ronde || 1;
+      const vastGroep = Uitvraag.cafVast(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
+      const vastKiest = vastGroep.filter(m => d.event_reacties.some(x => x.dienst_id && ids.has(x.dienst_id) && x.medewerker_id === m.id && x.kan)).length;
+      const stap = ronde < 2 ? `<b>Stap 1 van 3:</b> de vaste krachten zien hun diensten (grijs) en kunnen extra diensten kiezen (${vastKiest} hebben al iets gekozen). Op ${esc(A.datumLang(pl.ronde2))} worden die toegekend en gaan de open diensten ook naar de oproepkrachten.`
+        : ronde < 3 ? `<b>Stap 2 van 3:</b> de open diensten staan uit bij de oproepkrachten (${reageerden} van ${groep.length} hebben gereageerd).${pl.ronde3 ? ` Op ${esc(A.datumLang(pl.ronde3))} worden ze ingepland en krijgt iedereen een herinnering voor wat dan nog open is.` : ''}`
+        : `<b>Stap 3 van 3:</b> oproepkrachten zijn ingepland, iedereen heeft een herinnering gekregen voor de laatste open diensten. Wat nu nog binnenkomt wordt bij het definitief maken gelijk verdeeld (vast en oproep).`;
+      status = `<div class="statusbalk concept">⏳ <div><b>Voorlopig</b> – ${stap} <b>${cafOpen.length} open cafetariadienst${cafOpen.length === 1 ? '' : 'en'}.</b> Op ${esc(A.datumLang(pl.definitief))} wordt het rooster definitief gemaakt en verstuurd.${vlZin}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button></div></div>`;
     } else if (r.status === 'concept') {
       status = `<div class="statusbalk concept">📝 <div><b>Concept</b> – controleer het rooster; het personeel ziet het pas na versturen. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
         <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
@@ -213,6 +230,20 @@
     $('#volgende').onclick = () => { staat.maand = G.nextMonth(maand); pRooster(); };
     const k = id => document.getElementById(id);
     if (k('maakRooster')) k('maakRooster').onclick = e => A.bezig(e.currentTarget, () => maakRooster(maand));
+    if (k('maakVoorlopig')) k('maakVoorlopig').onclick = e => A.bezig(e.currentTarget, async () => {
+      await herlaad();
+      const plan = Uitvraag.maandPlanning(A.data, maand);
+      if (!await A.bevestig('Voorlopig rooster maken', `De vaste krachten worden nu ingepland voor ${A.maandNaam(maand)} en zien hun diensten (grijs). Daarna gaat het vanzelf verder volgens de planning (extra diensten, oproepkrachten, definitief op ${A.datumLang(plan.definitief)}).`, 'Maken')) return;
+      const res = await Uitvraag.cafVoorlopig(Store, A.data, maand);
+      for (let i = 0; i < 3 && await Uitvraag.cafStap(Store, A.data, maand, nu); i++);
+      await herlaad(); A.toast(`Voorlopig rooster gemaakt – ${res.open} open cafetariadienst(en)`, 'ok'); pRooster();
+    });
+    if (k('maakDefinitief')) k('maakDefinitief').onclick = e => A.bezig(e.currentTarget, async () => {
+      if (!await A.bevestig('Nu definitief maken', `De uitvraag stopt en de open cafetariadiensten worden verdeeld onder iedereen die "Ik kan" zei (vaste krachten en oproepkrachten gelijk).${d.instellingen.auto_publiceren ? ' Het rooster wordt daarna meteen verstuurd.' : ' Daarna kun je het controleren en versturen.'}`, 'Definitief maken')) return;
+      await herlaad();
+      const res = await Uitvraag.cafDefinitief(Store, A.data, maand);
+      await herlaad(); A.toast(`${res.gevuld} dienst(en) verdeeld${res.open ? ', ' + res.open + ' nog open' : ''}`, 'ok'); pRooster();
+    });
     if (k('opnieuwRooster')) k('opnieuwRooster').onclick = async e => { if (await A.bevestig('Opnieuw maken', 'Alle diensten van ' + A.maandNaam(maand) + ' worden opnieuw verdeeld. Handmatige wijzigingen gaan verloren. Feesten die via de uitvraag zijn ingepland blijven staan.', 'Opnieuw maken')) A.bezig(e.target, () => maakRooster(maand, true)); };
     if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Concept weggooien', 'Het concept-rooster voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
     if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand));
@@ -232,7 +263,8 @@
   async function maakRooster(maand, opnieuw) {
     if (opnieuw) await verwijderMaandDiensten(maand);
     await herlaad();
-    const res = G.generateMonth(maand, A.data);
+    const r0 = A.rooster(maand);
+    const res = r0 && r0.status === 'voorlopig' ? G.generateVoorlopig(maand, A.data) : G.generateMonth(maand, A.data);
     await Store.insert('diensten', res.diensten);
     const r = A.rooster(maand);
     const rec = { status: r ? r.status : 'concept', gegenereerd_op: new Date().toISOString(), meldingen: res.meldingen };
@@ -271,7 +303,7 @@
   }
 
   function renderKalender(el, maand, diensten) {
-    const d = A.data, nu = G.today();
+    const d = A.data, nu = G.today(), r = A.rooster(maand);
     const dicht = new Map(d.sluitingsdagen.map(s => [s.datum, s.reden]));
     const eerste = maand + '-01', laatste = G.lastDay(maand);
     let w = G.weekStart(eerste);
@@ -296,8 +328,8 @@
             return `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>${vl.length ? `<div class="vl-kop ${vo ? 'fout' : 'ok'}" data-ev="${e.id}">⏳ voorlopig · ${vo ? vo + ' open' : 'rond'}</div>` : ''}` +
               vlRijen.map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – uitvraag loopt nog">
                 ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join(''); }).join('')}
-          ${groepOpen(ds).map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}">
-            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
+          ${groepOpen(ds).map(({ x, n, ids }) => { const m = A.mw(x.medewerker_id); const kb = !m && r && r.status === 'voorlopig' && x.locatie === 'cafetaria' ? kanBij(ids) : null; return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}${kb !== null ? ' – ' + kb + ' oproepkracht(en) kunnen' : ''}">
+            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}${kb !== null ? ` <span class="kanaantal ${kb ? '' : 'nul'}">✓${kb}</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
           ${heeftRooster ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}
         </div>`;
       }
@@ -314,13 +346,15 @@
   function groepOpen(lijst) {
     const uit = [], open = new Map();
     for (const x of lijst) {
-      if (x.medewerker_id) { uit.push({ x, n: 1 }); continue; }
+      if (x.medewerker_id) { uit.push({ x, n: 1, ids: [x.id] }); continue; }
       const k = [x.event_id || '', x.locatie, x.functie, x.start, x.eind].join('|');
-      if (open.has(k)) open.get(k).n++;
-      else { const g = { x, n: 1 }; open.set(k, g); uit.push(g); }
+      if (open.has(k)) { open.get(k).n++; open.get(k).ids.push(x.id); }
+      else { const g = { x, n: 1, ids: [x.id] }; open.set(k, g); uit.push(g); }
     }
     return uit;
   }
+  // Hoeveel oproepkrachten zeiden 'Ik kan' bij deze open cafetariadienst(en)?
+  const kanBij = ids => new Set(A.data.event_reacties.filter(r => r.dienst_id && r.kan && ids.includes(r.dienst_id)).map(r => r.medewerker_id)).size;
 
   function renderPersonen(el, maand) {
     const d = A.data, dagen = G.monthDays(maand);
@@ -900,7 +934,7 @@
     const van = G.addDays(nu, -90);
     const oproep = A.data.medewerkers.filter(m => m.actief !== false && G.isOproep(m) && (m.locaties || []).includes('zalen'));
     const verdeling = oproep.map(m => { const ds = A.data.diensten.filter(d => d.medewerker_id === m.id && d.datum >= van);
-      return { m, n: ds.length, u: ds.reduce((t, d) => t + G.hours(d.start, d.eind), 0), kan: A.data.event_reacties.filter(r => r.medewerker_id === m.id && r.kan).length, gereageerd: A.data.event_reacties.filter(r => r.medewerker_id === m.id).length }; })
+      return { m, n: ds.length, u: ds.reduce((t, d) => t + G.hours(d.start, d.eind), 0), kan: A.data.event_reacties.filter(r => r.event_id && r.medewerker_id === m.id && r.kan).length, gereageerd: A.data.event_reacties.filter(r => r.event_id && r.medewerker_id === m.id).length }; })
       .sort((a, b) => b.u - a.u);
     const maxU = Math.max(1, ...verdeling.map(v => v.u));
 
@@ -1567,7 +1601,14 @@
       <div class="paneel"><h3>Automatisch rooster</h3>
         <div class="rij"><div class="veld"><label>Nieuw rooster maken … dagen voor het einde van de maand</label><input type="number" min="1" max="28" id="iDagen" value="${esc(s.dagen_voor_einde)}"></div>
           <div class="veld"><label>Personeel kan tot dag … van de maand doorgeven wanneer ze volgende maand niet kunnen</label><input type="number" min="1" max="31" id="iSlot" value="${esc(s.beschikbaarheid_slot || 25)}"></div></div>
-        <div class="veld" style="max-width:420px"><label>Oproepkrachten krijgen … dagen om te reageren op nieuwe feesten</label><input type="number" min="1" max="30" id="iUitvraag" value="${esc(s.uitvraag_dagen || 7)}"></div>
+        <div class="rij"><div class="veld"><label>Oproepkrachten krijgen … dagen om te reageren op nieuwe feesten</label><input type="number" min="1" max="30" id="iUitvraag" value="${esc(s.uitvraag_dagen || 7)}"></div>
+          <div class="veld"></div></div>
+        <h4 style="margin:.6em 0 .3em">Cafetaria in stappen <small class="zacht">(aantal dagen vóór het definitieve rooster)</small></h4>
+        <div class="rij">
+          <div class="veld"><label>1. Voorlopig rooster vaste krachten</label><input type="number" min="1" max="40" id="iCafR1" value="${esc(s.caf_ronde1_dagen != null && s.caf_ronde1_dagen !== '' ? s.caf_ronde1_dagen : 21)}"></div>
+          <div class="veld"><label>2. Extra's toekennen, rest naar oproepkrachten <small>(0 = stappen uit)</small></label><input type="number" min="0" max="28" id="iCafDagen" value="${esc(Uitvraag.cafDagen({ instellingen: s }))}"></div>
+          <div class="veld"><label>3. Oproepkrachten inplannen + herinnering</label><input type="number" min="0" max="14" id="iCafR3" value="${esc(s.caf_ronde3_dagen != null && s.caf_ronde3_dagen !== '' ? s.caf_ronde3_dagen : 2)}"></div></div>
+        <p class="zacht" style="font-size:.85rem;margin-top:-.2em">Stap 1: mensen met contracturen of vaste werkdagen worden ingepland en zien hun diensten (grijs); bij Beschikbaar kunnen ze extra diensten kiezen. Stap 2: die extra's worden toegekend en de open diensten gaan ook naar de oproepkrachten met cafetaria. Stap 3: oproepkrachten die "Ik kan" zeiden worden ingepland en iedereen krijgt een herinnering voor wat nog open is. De reacties van de laatste dagen (na de herinnering) worden op de dag van het nieuwe rooster verdeeld; vaste krachten en oproepkrachten tellen dan gelijk.</p>
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
         <label class="check"><input type="checkbox" id="iFeestRuil" ${s.feest_ruil_goedkeuring ? 'checked' : ''}> Overnemen van een bevestigde feestplek (nog vóór het inplannen) eerst laten goedkeuren door beheer</label>
@@ -1595,9 +1636,9 @@
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, feest_ruil_goedkeuring: $('#iFeestRuil').checked, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
+      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, feest_ruil_goedkeuring: $('#iFeestRuil').checked, caf_uitvraag_dagen: $('#iCafDagen').value === '' ? 14 : +$('#iCafDagen').value, caf_ronde1_dagen: +$('#iCafR1').value || 21, caf_ronde3_dagen: $('#iCafR3').value === '' ? 2 : +$('#iCafR3').value, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
       // Kolommen die nog niet in Supabase bestaan overslaan, met uitleg welk SQL-bestand nodig is
-      const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'], feest_ruil_goedkeuring: ['goedkeuren van feestplekken', 'ruilen-feest.sql'] };
+      const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'], feest_ruil_goedkeuring: ['goedkeuren van feestplekken', 'ruilen-feest.sql'], caf_uitvraag_dagen: ['het voorlopige cafetariarooster', 'cafetaria-ronde.sql'], caf_ronde1_dagen: ['de cafetaria-stappen', 'cafetaria-ronde.sql'], caf_ronde3_dagen: ['de cafetaria-stappen', 'cafetaria-ronde.sql'] };
       const gemist = [];
       for (let poging = 0; ; poging++) {
         try { await Store.update('instellingen', 1, wijz); break; }

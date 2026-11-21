@@ -77,6 +77,11 @@
   // Een feest met lopende uitvraag of al ingeplande uitvraag wordt niet door het maandrooster aangeraakt
   G.eventVast = e => !!e && ['open', 'concept', 'ingepland'].includes(e.status);
   G.isOproep = m => !(+m.contracturen > 0);
+  // Cafetaria: wie geen contracturen én geen vaste werkdagen heeft, kiest zelf uit de open diensten (uitvraag)
+  G.isCafOproep = m => !(+m.contracturen > 0) && !((m.vaste_dagen || []).length);
+  G.cafOproepGroep = data => (data.medewerkers || []).filter(m => m.actief !== false && G.isCafOproep(m) && (m.locaties || []).includes('cafetaria'));
+  // Mag deze oproepkracht reageren op deze open cafetariadienst?
+  G.cafPast = (m, d) => (m.functies || []).includes(d.functie) && !(m.vrije_dagen || []).map(Number).includes(G.weekday(d.datum));
   // Is deze dienst 'vastgezet' (hoort bij een feest dat via de uitvraag is ingepland)?
   G.dienstVast = (d, data) => !!d.event_id && (data.zalen_events || []).some(e => e.id === d.event_id && (e.status === 'ingepland' || e.status === 'concept'));
 
@@ -130,7 +135,11 @@
     ctx.events = {};
     for (const e of data.zalen_events || []) ctx.events[e.id] = e;
     ctx.reacties = {};
-    for (const r of data.event_reacties || []) (ctx.reacties[r.event_id] = ctx.reacties[r.event_id] || {})[r.medewerker_id] = r.kan;
+    ctx.dReac = {};   // reacties op open cafetariadiensten (event_reacties met dienst_id)
+    for (const r of data.event_reacties || []) {
+      if (r.dienst_id) (ctx.dReac[r.dienst_id] = ctx.dReac[r.dienst_id] || {})[r.medewerker_id] = r.kan;
+      else if (r.event_id) (ctx.reacties[r.event_id] = ctx.reacties[r.event_id] || {})[r.medewerker_id] = r.kan;
+    }
     ctx.vandaag = G.today();
     ctx.ziek = (data.ziekmeldingen || []).filter(z => z.status !== 'afgewezen');
     ctx.P = G.plannerInst(data);
@@ -179,6 +188,24 @@
     if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && (!z.tot || z.tot >= slot.datum))) return { ok: false, reden: 'ziek gemeld' };
     const ob = ctx.onbeschikbaar.find(b => b.medewerker_id === m.id && b.datum === slot.datum && onbeschikbaarDeel(b.deel, slot));
     if (ob) return { ok: false, reden: 'heeft aangegeven niet te kunnen' };
+    // Cafetaria in twee rondes: eerst alleen vaste krachten, daarna oproepkrachten die 'Ik kan' zeiden
+    // (wie geen uren maar wel vaste werkdagen heeft, staat in ronde 1 alleen op die vaste dagen)
+    //   fase 'vast'  : alleen vaste krachten (contracturen of vaste werkdagen), niet boven hun uren
+    //   fase 'extra' : open diensten naar vaste krachten die 'Ik kan' zeiden (extra werken)
+    //   fase 'oproep': open diensten naar oproepkrachten die 'Ik kan' zeiden
+    //   fase 'alle'  : laatste ronde – vaste krachten en oproepkrachten gelijk, wie 'Ik kan' zei
+    if (slot.locatie === 'cafetaria' && ctx.cafFase) {
+      const oproep = G.isCafOproep(m);
+      if (ctx.cafFase === 'vast') {
+        if (oproep) return { ok: false, reden: 'oproepkracht – kiest zelf in de uitvraag' };
+        if (!(+m.contracturen > 0) && !(m.vaste_dagen || []).map(Number).includes(wd)) return { ok: false, reden: 'geen vaste werkdag – kan zelf extra kiezen' };
+      } else {
+        if (ctx.cafFase !== 'alle' && (ctx.cafFase === 'extra') === oproep) return { ok: false, reden: oproep ? 'oproepkracht – komt later aan de beurt' : 'vaste kracht – alleen als er niemand anders is' };
+        const r = (ctx.dReac[slot.id] || {})[m.id];
+        if (r !== true) return { ok: false, reden: r === false ? 'heeft gezegd niet te kunnen' : 'heeft niet gereageerd' };
+        return { ok: true, reactieKan: true };
+      }
+    }
     const ev = slot.event_id && ctx.events[slot.event_id];
     let reactieKan = false;
     if (ev && ev.uitvraag) {
@@ -243,6 +270,8 @@
         const doel = G.doelUren(m, mnd), v = gepland - doel;
         if (v < 0) k.uren += 0.15 * v * v;
         else k.uren += 0.3 * v * v + (v > doel * 0.1 ? 3 * (v - doel * 0.1) ** 2 : 0);
+        // ronde 1 cafetaria: vaste krachten niet (veel) boven hun uren; de rest is voor de oproepkrachten
+        if (ctx.cafFase === 'vast' && v > 3) k.uren += 2500 * (v - 3);
       }
       k.uren *= W.uren;
     } else {
@@ -372,11 +401,12 @@
   G.plan = function (slots, data, bestaande, opties) {
     opties = opties || {};
     const ctx = G.context(data, bestaande);
+    ctx.cafFase = opties.cafFase || null;
     const meldingen = [];
     const mws = (data.medewerkers || []).filter(m => m.actief !== false);
     const maanden = [...new Set(slots.map(s => G.monthOf(s.datum)))].sort();
     const OPEN = 2000;
-    const diensten = slots.map(s => ({ id: G.uuid(), maand: G.monthOf(s.datum), datum: s.datum, locatie: s.locatie, event_id: s.event_id || null, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' }));
+    const diensten = slots.map(s => ({ id: s.id || G.uuid(), maand: G.monthOf(s.datum), datum: s.datum, locatie: s.locatie, event_id: s.event_id || null, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' }));
     const n = diensten.length;
     if (!n || !maanden.length) return { diensten, meldingen, info: { geprobeerd: 0, verbeterd: 0 } };
     ctx.bron = diensten.concat((bestaande || []).filter(d => maanden.includes(G.monthOf(d.datum))));
@@ -391,7 +421,7 @@
 
     // 0: door de baas bevestigde mensen staan vast op hun feest (en worden daarna niet meer verschoven)
     const vast = new Array(n).fill(false);
-    for (const r of (data.event_reacties || []).filter(r => r.kan && r.bevestigd_functie)) {
+    for (const r of (data.event_reacties || []).filter(r => r.kan && r.bevestigd_functie && r.event_id)) {
       const m = perId[r.medewerker_id]; if (!m) continue;
       let i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id && d.functie === r.bevestigd_functie);
       if (i < 0) i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id && (m.functies || []).includes(d.functie));
@@ -411,7 +441,7 @@
         const nk = kosten(ctx, m, lijst[m.id].concat([d]), maanden).totaal;
         if (nk - kost[m.id] < besteDelta) { besteDelta = nk - kost[m.id]; beste = m; besteK = nk; }
       }
-      if (beste) { wie[i] = beste.id; d.medewerker_id = beste.id; lijst[beste.id].push(d); kost[beste.id] = besteK; }
+      if (beste && besteDelta < OPEN) { wie[i] = beste.id; d.medewerker_id = beste.id; lijst[beste.id].push(d); kost[beste.id] = besteK; }
     }
 
     // 3: verbeteren (simulated annealing)
@@ -428,7 +458,12 @@
       const i = Math.floor(toeval() * n), d = diensten[i], a = wie[i];
       if (!kand[i].length || vast[i]) continue;
       let delta, toepassen;
-      if (toeval() < 0.5 || !a) {
+      if (a && ctx.cafFase && toeval() < 0.08) {
+        // (alleen bij de cafetaria-rondes) dienst weer open zetten als dat goedkoper is
+        const la = zonder(lijst[a], d), ka = kosten(ctx, perId[a], la, maanden).totaal;
+        delta = (ka - kost[a]) + OPEN;
+        toepassen = () => { lijst[a] = la; kost[a] = ka; wie[i] = null; };
+      } else if (toeval() < 0.5 || !a) {
         // dienst aan iemand anders geven
         const m = kand[i][Math.floor(toeval() * kand[i].length)];
         if (m.id === a) continue;
@@ -460,7 +495,7 @@
     diensten.forEach((d, i) => { d.medewerker_id = besteWie[i]; if (besteWie[i]) eind[besteWie[i]].push(d); });
 
     const result = diensten.slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0) || G.min(a.start) - G.min(b.start) || a.locatie.localeCompare(b.locatie));
-    for (const d of result) if (!d.medewerker_id) meldingen.push('Geen geschikte medewerker voor ' + d.functie + ' op ' + d.datum + ' (' + d.start + '-' + d.eind + ', ' + d.locatie + ')');
+    for (const d of result) if (!d.medewerker_id && !(ctx.cafFase === 'vast' && d.locatie === 'cafetaria')) meldingen.push('Geen geschikte medewerker voor ' + d.functie + ' op ' + d.datum + ' (' + d.start + '-' + d.eind + ', ' + d.locatie + ')');
 
     // wat er niet helemaal gelukt is
     const P = ctx.P;
@@ -502,6 +537,19 @@
     const elders = (data.diensten || []).filter(d => d.maand !== maand || G.dienstVast(d, data));
     return G.plan(slots, data, elders, opties);
   };
+
+  // Ronde 1: voorlopig rooster – cafetaria alleen met vaste krachten (contracturen of vaste werkdagen)
+  G.generateVoorlopig = (maand, data, opties) => G.generateMonth(maand, data, { ...(opties || {}), cafFase: 'vast' });
+
+  // Open cafetariadiensten verdelen onder wie 'Ik kan' zei (eerlijk, geen voorrang voor wie eerst reageerde)
+  // fase 'oproep' = oproepkrachten, fase 'extra' = vaste krachten die extra willen werken
+  G.cafVerdeel = function (maand, data, fase, opties) {
+    const open = (data.diensten || []).filter(d => d.maand === maand && d.locatie === 'cafetaria' && !d.medewerker_id);
+    const ids = new Set(open.map(d => d.id));
+    const rest = (data.diensten || []).filter(d => !ids.has(d.id));
+    return G.plan(open.map(d => ({ ...d })), data, rest, { ...(opties || {}), cafFase: fase });
+  };
+  G.cafDefinitief = (maand, data, opties) => G.cafVerdeel(maand, data, 'oproep', opties);
 
   // Uitvraag afsluiten: alle feesten in één keer verdelen (eerlijk over de datums heen)
   G.planEvents = function (events, data, opties) {
