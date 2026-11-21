@@ -359,10 +359,10 @@
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
           <div class="indeling-namen">${rij.map(x => { const m = A.mw(x.medewerker_id);
             const attr = wijzig ? ` data-wissel="${x.id}" role="button" tabindex="0" title="Klik om iemand anders op deze plek te zetten"` : '';
-            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? '⭐ ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ' <span class="potlood">✎</span>' : ''}</span>`
+            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? '⭐ ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
                      : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
       ${baas ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">⭐ = ${esc(beheerNaam())} zelf. Die plekken blijven open staan voor het personeel: wie toch kan, kan zo'n plek oppakken.</p>` : ''}
-      ${wijzig ? '<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven. Pas na "Versturen naar personeel" krijgt iedereen een melding.</p>' : ''}
+      ${wijzig ? '<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. Pas na "Versturen naar personeel" krijgt iedereen een melding.</p>' : ''}
     </div>`;
   }
 
@@ -405,15 +405,15 @@
       if (vrij) taak.push(optie('__naar:' + vrij.id, `<b>${esc(nu.naam)} → ${esc(f)}</b> <small class="zacht">daar is een plek vrij; ${esc(d.functie)} wordt open</small>`));
       for (const x of zelfde.filter(x => x.functie === f && x.medewerker_id)) {
         const p = A.mw(x.medewerker_id);
-        if (p && (p.functies || []).includes(d.functie)) { ruilIds.add(x.id); taak.push(optie('__ruil:' + x.id, `<b>${esc(nu.naam)} → ${esc(f)}</b> <span class="zacht">en</span> <b>${esc(p.naam)} → ${esc(d.functie)}</b> <small class="zacht">(taken ruilen)</small>`)); }
+        if (p && p.id !== nu.id && (p.functies || []).includes(d.functie)) { ruilIds.add(x.id); taak.push(optie('__ruil:' + x.id, `<b>${esc(nu.naam)} → ${esc(f)}</b> <span class="zacht">en</span> <b>${esc(p.naam)} → ${esc(d.functie)}</b> <small class="zacht">(taken ruilen)</small>`)); }
       }
     }
     const html = `<p style="margin-top:0"><b>${esc(e.naam)}</b> · ${esc(A.datumLang(e.datum))} · ${esc(d.functie)} ${esc(d.start)}–${esc(d.eind)}<br><span class="zacht">Nu: ${nu ? esc(nu.naam) : 'open'}</span></p>
+      ${nu ? `<div class="wissel-lijst" style="margin-bottom:.6em">${optie('__open', `<b style="color:var(--fout)">✕ ${esc(nu.naam)} van deze plek halen</b> <small class="zacht">(plek wordt open)</small>`)}</div>` : ''}
       ${taak.length ? `<h4 style="margin:.2em 0 .3em">🔀 Taak van ${esc(nu.naam)} wijzigen</h4><div class="wissel-lijst" style="margin-bottom:.6em">${taak.join('')}</div>
         <h4 style="margin:.2em 0 .3em">👤 Of iemand anders op ${esc(d.functie)}</h4>` : ''}
       <div class="wissel-lijst">
         ${kand.filter(k => !(k.elders && ruilIds.has(k.elders.id))).map(k => optie(k.m.id, `<span class="stip" style="background:${esc(k.m.kleur)}"></span><b>${esc(k.m.naam)}</b> ${lbl[k.rc]}${k.elders ? ` <span class="label let">${nu ? `staat op ${esc(k.elders.functie)} – wisselen met ${esc(nu.naam)}` : `staat op ${esc(k.elders.functie)} – verplaatsen (die plek wordt open)`}</span>` : ''}${!k.ok && !k.elders ? ` <small class="zacht">(${esc((k.redenen || []).join(', ') || 'past niet')})</small>` : ''}`, !k.ok && !k.elders)).join('') || '<p class="zacht">Niemand anders heeft deze functie.</p>'}
-        ${nu ? optie('__open', '<b style="color:var(--fout)">Plek leeg maken (open)</b>') : ''}
       </div>
       <div class="inhuur-blok">
         ${beheerMw() && beheerMw().id === d.medewerker_id ? '' : optie('__beheer', `<b>⭐ ${esc(beheerNaam())} zelf</b>${dubbel(beheerMw()) ? ` <span class="label let">staat al op ${esc(dubbel(beheerMw()).functie)}</span>` : ''} <small class="zacht">– plek blijft open voor personeel</small>`)}
@@ -1236,6 +1236,14 @@
         await A.melding(m.id, `De bevestiging voor ${omschr(ev0)} is ingetrokken. Je opgave "Ik kan" blijft staan; na de termijn wordt het werk verdeeld.`);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
       }));
+      bg.querySelectorAll('[data-leeg]').forEach(k => k.onclick = async ev2 => {
+        ev2.stopPropagation();
+        const d = A.data.diensten.find(x => x.id === k.dataset.leeg); if (!d) return;
+        if (!await A.bevestig('Van de plek halen', `${A.mwNaam(d.medewerker_id)} van ${d.functie} halen? De plek wordt open.`, 'Ja, eraf')) return;
+        await Store.update('diensten', d.id, { medewerker_id: null });
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
+        A.toast('Plek ' + d.functie + ' is weer open');
+      });
       bg.querySelectorAll('[data-wissel]').forEach(k => {
         const doe = async () => { if (await wisselPlek(k.dataset.wissel)) { bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id)); } };
         k.onclick = doe; k.onkeydown = ev2 => { if (ev2.key === 'Enter') doe(); };
