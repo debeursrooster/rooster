@@ -74,7 +74,7 @@
   const gezienSleutel = () => 'rooster_gezien_' + ik.id;
   const gezien = () => { try { return JSON.parse(localStorage.getItem(gezienSleutel()) || '[]'); } catch (x) { return []; } };
   const zetGezien = evs => { try { localStorage.setItem(gezienSleutel(), JSON.stringify([...new Set([...gezien(), ...evs.map(e => e.id)])].slice(-200))); } catch (x) { } };
-  const nieuweUitvragen = () => { const g = gezien(); return mijnUitvragen().filter(e => !mijnReactie(e) && !g.includes(e.id)); };
+  const nieuweUitvragen = () => mijnUitvragen().filter(e => !mijnReactie(e));
   // Bevestigde feestplekken (nog geen echte dienst) die je kunt aanbieden of overnemen
   const evOpen = e => e && e.status === 'open' && e.datum >= G.today();
   const mijnBevestigd = () => A.data.event_reacties.filter(r => r.medewerker_id === ik.id && r.kan && r.bevestigd_functie && evOpen(A.event(r.event_id)))
@@ -192,11 +192,16 @@
         ${r && r.kan && r.bevestigd_functie
           ? `<div style="flex-basis:100%;display:flex;align-items:center;gap:.6em;justify-content:flex-end;flex-wrap:wrap"><label class="schuif" title="Bevestigd"><input type="checkbox" checked disabled><span class="baan"><i></i></span><span class="schuif-tekst">🔒 Bevestigd</span></label>
              <small class="zacht" style="flex-basis:100%;text-align:right">Kun je toch niet? Bied je plek aan bij <b>Ruilen</b> of neem contact op met ${esc(beheerNaam())}.</small></div>`
-          : `<label class="schuif"><input type="checkbox" data-reac="${e.id}" ${r && r.kan ? 'checked' : ''}><span class="baan"><i></i></span><span class="schuif-tekst">${r && r.kan ? 'Ik kan' : 'Kan niet'}</span></label>`}</div>`; };
+          : (() => { const st = !r ? 'leeg' : r.kan ? 'ja' : 'nee';
+              return `<div class="keuze3-wrap"><div class="keuze3 st-${st}" data-reac="${e.id}" role="group" aria-label="Kun je op ${esc(e.naam)}?">
+                <button type="button" class="k3-tekst nee" data-kan="0">Kan niet</button>
+                <span class="k3-baan"><button type="button" class="k3-helft" data-kan="0" aria-label="Kan niet"></button><button type="button" class="k3-helft" data-kan="1" aria-label="Ik kan"></button><i></i></span>
+                <button type="button" class="k3-tekst ja" data-kan="1">Ik kan</button></div>
+                ${st === 'leeg' ? '<small class="k3-hint">Nog niet gekozen</small>' : ''}</div>`; })()}</div>`; };
     zetGezien(uitvragen);
     $('#inhoud').innerHTML = `
       ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
-        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Zet de schuif aan (groen) als je kunt. Laat je hem grijs, dan kun je niet. Zet je hem aan, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
+        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Schuif naar rechts (groen) als je kunt, naar links (rood) als je niet kunt. Kun je, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
         ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
       ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`)).join('')}</div>` : ''}
       ${!uitvragen.length && !open.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
@@ -262,10 +267,12 @@
       if (r.naar_id) await A.melding(r.naar_id, `${ik.naam} heeft het ruilverzoek ingetrokken. Er verandert niets aan jouw diensten.`);
       await ververs(); A.toast('Ruilverzoek ingetrokken');
     }));
-    document.querySelectorAll('[data-reac]').forEach(b => b.onchange = async () => {
-      const e = A.event(b.dataset.reac), kan = b.checked;
-      b.nextElementSibling.nextElementSibling.textContent = kan ? 'Ik kan' : 'Kan niet';
-      b.disabled = true;
+    document.querySelectorAll('.keuze3[data-reac] [data-kan]').forEach(k => k.onclick = async () => {
+      const b = k.closest('.keuze3'), e = A.event(b.dataset.reac), kan = k.dataset.kan === '1';
+      const huidig = mijnReactie(e);
+      if (huidig && huidig.kan === kan) return;
+      b.className = 'keuze3 bezig st-' + (kan ? 'ja' : 'nee');
+      const hint = b.parentNode.querySelector('.k3-hint'); if (hint) hint.remove();
       try {
       await A.reload();
       const ev = A.event(e.id);
