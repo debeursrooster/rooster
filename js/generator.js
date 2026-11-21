@@ -140,6 +140,12 @@
       if (r.dienst_id) (ctx.dReac[r.dienst_id] = ctx.dReac[r.dienst_id] || {})[r.medewerker_id] = r.kan;
       else if (r.event_id) (ctx.reacties[r.event_id] = ctx.reacties[r.event_id] || {})[r.medewerker_id] = r.kan;
     }
+    // al bevestigd voor een feest waarvan de uitvraag nog loopt (nog geen echte dienst): telt als bezet
+    ctx.bevestigd = {};
+    for (const r of data.event_reacties || []) {
+      const e = r.event_id && r.kan && r.bevestigd_functie && ctx.events[r.event_id];
+      if (e && e.status === 'open') (ctx.bevestigd[r.medewerker_id] = ctx.bevestigd[r.medewerker_id] || []).push(e);
+    }
     ctx.vandaag = G.today();
     ctx.ziek = (data.ziekmeldingen || []).filter(z => z.status !== 'afgewezen');
     ctx.P = G.plannerInst(data);
@@ -337,6 +343,8 @@
     const lijst = p.diensten.filter(d => d !== slot && !(slot.id && d.id === slot.id));
     const nee = pastErbij(m, slot, lijst);
     if (nee) return { ok: false, redenen: [nee] };
+    const feest = ((ctx.bevestigd || {})[m.id] || []).find(e => e.id !== slot.event_id && G.overlap(e, slot));
+    if (feest) return { ok: false, redenen: ['bevestigd voor ' + (feest.naam || 'een feest')] };
     if (opties.alleenOk) return { ok: true, score: 0, redenen: [] };
 
     const maanden = [G.monthOf(slot.datum)];

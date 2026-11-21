@@ -141,7 +141,9 @@
       <div class="tegels">
         <div class="tegel klik ${verlofOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/verlof"><div class="getal">${verlofOpen.length}</div><div class="wat">vrij-aanvragen</div></div>
         <div class="tegel klik ${ruilOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/ruil"><div class="getal">${ruilOpen.length}</div><div class="wat">ruilingen goed te keuren</div></div>
-        <div class="tegel klik ${openDiensten.length + vlOpenNu.length ? 'aandacht' : ''}" data-ga="rooster"><div class="getal">${openDiensten.length + vlOpenNu.length}</div><div class="wat">open diensten${vlOpenNu.length ? `<br><small>waarvan ${vlOpenNu.length} bij feesten met lopende uitvraag</small>` : ''}</div></div>
+        ${(() => { const caf = openDiensten.filter(x => x.locatie === 'cafetaria').length, zaal = openDiensten.filter(x => x.locatie !== 'cafetaria').length + vlOpenNu.length;
+          return `<div class="tegel klik ${zaal ? 'aandacht' : ''}" data-ga="rooster" data-loc="zalen"><div class="getal">${zaal}</div><div class="wat">open diensten zalencentrum${vlOpenNu.length ? `<br><small>waarvan ${vlOpenNu.length} bij feesten met lopende uitvraag</small>` : ''}</div></div>
+        <div class="tegel klik ${caf ? 'aandacht' : ''}" data-ga="rooster" data-loc="cafetaria"><div class="getal">${caf}</div><div class="wat">open diensten cafetaria</div></div>`; })()}
         <div class="tegel klik" data-ga="rooster" data-maand="${volgende}"><div class="getal" style="font-size:1.4rem">${roosterTekst}</div><div class="wat">rooster ${esc(A.maandNaam(volgende))}<br><small>${roosterSub}</small></div></div>
       </div>
       <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
@@ -160,6 +162,7 @@
       const [p, sub] = t.dataset.ga.split('/');
       if (sub) staat.aanvraagTab = sub;
       if (t.dataset.maand) staat.maand = t.dataset.maand;
+      if (t.dataset.loc) staat.loc = t.dataset.loc;
       location.hash = p;
     });
     const ag = $('#allesGelezen');
