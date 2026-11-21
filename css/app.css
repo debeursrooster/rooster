@@ -401,7 +401,7 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .keuze3 { display: inline-flex; align-items: center; gap: .5em; user-select: none; -webkit-tap-highlight-color: transparent; }
 .keuze3.bezig { opacity: .6; pointer-events: none; }
 .k3-tekst { font: inherit; font-weight: 700; font-size: .85rem; border: 0; background: none; padding: .3em .1em; color: #b8aea2; cursor: pointer; }
-.k3-baan { position: relative; width: 76px; height: 32px; border-radius: 999px; background: #d9d3cb; box-shadow: inset 0 2px 4px rgba(0,0,0,.18); transition: background .2s; flex: none; display: flex; }
+.k3-baan { touch-action: pan-y; position: relative; width: 76px; height: 32px; border-radius: 999px; background: #d9d3cb; box-shadow: inset 0 2px 4px rgba(0,0,0,.18); transition: background .2s; flex: none; display: flex; }
 .k3-helft { flex: 1; border: 0; background: transparent; cursor: pointer; position: relative; z-index: 2; padding: 0; }
 .k3-baan i { position: absolute; top: 3px; left: 25px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.25); transition: left .2s; z-index: 1; }
 .keuze3.st-nee .k3-baan { background: linear-gradient(180deg, #d9534f, #e8706b); }
