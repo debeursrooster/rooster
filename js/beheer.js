@@ -350,7 +350,7 @@
     const open = ds.filter(x => !x.medewerker_id).length, baas = ds.filter(x => A.beheerPlek(x)).length;
     const dubbelIds = new Set(A.dubbelOpFeest(e.id).flatMap(g => g.ds.map(x => x.id)));
     const fns = [...new Set(ds.map(x => x.functie))];
-    const wijzig = e.status === 'concept';
+    const wijzig = e.status === 'concept' || e.status === 'ingepland';
     const tijd = x => (x.start !== e.start || x.eind !== e.eind) ? ` <small class="zacht">${esc(x.start)}–${esc(x.eind)}</small>` : '';
     return `<div class="indeling">
       <div class="indeling-kop"><b>${e.status === 'concept' ? '📝 Ingepland, nog niet verstuurd' : '✅ Ingepland en verstuurd'}</b>
@@ -362,13 +362,31 @@
             return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? '⭐ ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
                      : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
       ${baas ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">⭐ = ${esc(beheerNaam())} zelf. Die plekken blijven open staan voor het personeel: wie toch kan, kan zo'n plek oppakken.</p>` : ''}
-      ${wijzig ? '<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. Pas na "Versturen naar personeel" krijgt iedereen een melding.</p>' : ''}
+      ${wijzig ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. ${e.status === 'ingepland' ? 'Het is al verstuurd: wie erbij komt, eraf gaat of een andere taak krijgt, krijgt meteen een melding.' : 'Pas na "Versturen naar personeel" krijgt iedereen een melding.'}</p>` : ''}
     </div>`;
   }
 
   // De baas zelf als 'medewerker' (niet actief: geen inlog, geen uitvragen of meldingen), zodat hij zichzelf kan inzetten
   const beheerNaam = () => A.data.instellingen.beheer_naam || 'Beheer';
   const beheerMw = () => A.data.medewerkers.find(m => A.isBeheer(m));
+
+  // Na een wijziging in een al verstuurd feest: wie erbij komt, eraf gaat of een andere taak krijgt een melding
+  const indelingFoto = evId => A.data.diensten.filter(x => x.event_id === evId).map(x => ({ id: x.medewerker_id, f: x.functie }));
+  async function meldIndelingWijziging(evId, voor) {
+    const e = A.event(evId); if (!e || e.status !== 'ingepland') return 0;
+    const na = indelingFoto(evId), wat = `${e.naam} op ${A.datumLang(e.datum)} (${e.start}–${e.eind})`;
+    const fns = (lijst, id) => lijst.filter(x => x.id === id).map(x => x.f).sort().join(', ');
+    let n = 0;
+    for (const id of [...new Set([...voor, ...na].map(x => x.id).filter(Boolean))]) {
+      const m = A.mw(id); if (!m || m.actief === false) continue;   // baas en inhuur krijgen geen meldingen
+      const oud = fns(voor, id), nieuw = fns(na, id); if (oud === nieuw) continue;
+      const tekst = !nieuw ? `❌ Je staat niet meer ingepland bij ${wat}. Je hoeft die dag niet te komen.`
+        : !oud ? `✅ Je bent ingepland bij ${wat} als ${nieuw}.`
+        : `🔀 Je taak bij ${wat} is gewijzigd: je doet nu ${nieuw} (was ${oud}).`;
+      await A.melding(id, tekst, { titel: 'Rooster gewijzigd' }); n++;
+    }
+    return n;
+  }
 
   // Waarschuwing als iemand op twee plekken tegelijk staat. true = doorgaan, false = de baas wil het nog wijzigen
   async function dubbelCheck(evId, knopLabel) {
@@ -1240,12 +1258,18 @@
         ev2.stopPropagation();
         const d = A.data.diensten.find(x => x.id === k.dataset.leeg); if (!d) return;
         if (!await A.bevestig('Van de plek halen', `${A.mwNaam(d.medewerker_id)} van ${d.functie} halen? De plek wordt open.`, 'Ja, eraf')) return;
+        const voor = indelingFoto(e.id);
         await Store.update('diensten', d.id, { medewerker_id: null });
-        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
-        A.toast('Plek ' + d.functie + ' is weer open');
+        bg.querySelector('.sluit').click(); await herlaad();
+        const n = await meldIndelingWijziging(e.id, voor);
+        opnieuw(); eventModal(A.event(e.id));
+        A.toast('Plek ' + d.functie + ' is weer open' + (n ? ` – ${n} melding verstuurd` : ''));
       });
       bg.querySelectorAll('[data-wissel]').forEach(k => {
-        const doe = async () => { if (await wisselPlek(k.dataset.wissel)) { bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id)); } };
+        const doe = async () => { const voor = indelingFoto(e.id);
+          if (await wisselPlek(k.dataset.wissel)) { bg.querySelector('.sluit').click(); await herlaad();
+            const n = await meldIndelingWijziging(e.id, voor); if (n) A.toast(`${n} melding(en) verstuurd naar wie het betreft`, 'ok');
+            opnieuw(); eventModal(A.event(e.id)); } };
         k.onclick = doe; k.onkeydown = ev2 => { if (ev2.key === 'Enter') doe(); };
       });
       const et = bg.querySelector('#eTerug');
