@@ -33,7 +33,7 @@
 
   // ---------- service worker ----------
   let regBelofte = null;
-  P.registratie = () => regBelofte || (regBelofte = navigator.serviceWorker.register('sw.js'));
+  P.registratie = () => regBelofte || (regBelofte = navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }));
   if ('serviceWorker' in navigator) P.registratie().catch(e => console.warn('Service worker', e));
 
   const demo = () => window.Store && Store.modus === 'demo';
