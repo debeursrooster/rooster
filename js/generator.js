@@ -236,7 +236,8 @@
     let reactieKan = false;
     if (ev && ev.uitvraag) {
       const r = (ctx.reacties[ev.id] || {})[m.id];
-      if (r === false) return { ok: false, reden: 'heeft gezegd niet te kunnen' };
+      // (bij Beschikbaar mag wie eerder 'kan niet' zei een open plek toch nog oppakken: negeerReactie)
+      if (r === false && !opties.negeerReactie) return { ok: false, reden: 'heeft gezegd niet te kunnen' };
       if (G.isOproep(m) && r !== true && !opties.negeerUitvraag) return { ok: false, reden: r === undefined ? 'heeft niet gereageerd' : 'niet beschikbaar' };
       reactieKan = r === true;
     }

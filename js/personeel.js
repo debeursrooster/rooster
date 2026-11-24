@@ -122,7 +122,7 @@
   // kan ik deze dienst doen?
   function kanIk(dienst) {
     const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== dienst.id));
-    return G.beoordeel(ctx, ik, { ...dienst, medewerker_id: null }, { negeerUitvraag: true, alleenOk: true });
+    return G.beoordeel(ctx, ik, { ...dienst, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true, alleenOk: true });
   }
   const ruilAanbod = () => A.data.ruilverzoeken.filter(r => r.status === 'open' && r.van_id !== ik.id).map(r => ({ r, d: A.data.diensten.find(x => x.id === r.dienst_id) }))
     .filter(x => x.d && x.d.datum >= G.today() && zichtbaar(x.d) && kanIk(x.d).ok);
@@ -250,7 +250,7 @@
       ${cafMaanden.map(mnd => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">${gs[0].extra ? 'Je vaste diensten staan (grijs) bij Mijn diensten. Wil je extra werken? Zet de schuif naar rechts bij de diensten die je erbij wilt; laat hem staan als je geen extra wilt.' : 'Het voorlopige rooster is gemaakt. Deze diensten zijn nog open. Schuif naar rechts als je kunt, naar links als je niet kunt.'} Kiezen kan t/m <b>${esc(A.datumLang(gs[0].tot))}</b>; daarna wordt het werk eerlijk verdeeld (wie het eerst reageert, krijgt geen voorrang).</p>
         ${gs.map(cafItem).join('')}</div>`; }).join('')}
-      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', (A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ ${esc(A.mwNaam(d.medewerker_id))} vult deze plek nu zelf in – kun jij? Dan neem je hem over</div>` : '') + (evConcept(d) ? '<div class="meta zacht">Het rooster van dit feest is nog niet verstuurd. Pak je hem op, dan sta je er voorlopig op.</div>' : ''))).join('')}</div>` : ''}
+      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', (A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ ${esc(A.mwNaam(d.medewerker_id))} vult deze plek nu zelf in – kun jij? Dan neem je hem over</div>` : '') + ((A.data.event_reacties.find(r => d.event_id && r.event_id === d.event_id && r.medewerker_id === ik.id) || {}).kan === false ? '<div class="meta zacht">Je had gezegd dat je niet kon. Kun je nu toch? Dan kun je hem oppakken.</div>' : '') + (evConcept(d) ? '<div class="meta zacht">Het rooster van dit feest is nog niet verstuurd. Pak je hem op, dan sta je er voorlopig op.</div>' : ''))).join('')}</div>` : ''}
       ${!uitvragen.length && !open.length && !caf.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
     koppelActies();
     const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
