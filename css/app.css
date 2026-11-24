@@ -438,3 +438,17 @@ table.lijst tr.klik { cursor: pointer; } table.lijst tr.klik:hover td { backgrou
 .wissel-optie input[type=radio] { width: 18px !important; height: 18px; flex: none; margin: 0; padding: 0; box-shadow: none; }
 .wissel-optie > span { flex: 1; justify-content: flex-start; text-align: left; }
 .inhuur-blok { border-top: 1px solid #f1e9dd; margin-top: .5em; padding-top: .4em; }
+
+/* De baas werkt zelf mee: vooraf instellen en per functie overnemen toestaan */
+.baas-vooraf { background: #fbf1d3; border: 1px dashed #c9a227; border-radius: 10px; padding: .7em .9em; }
+.baas-rij { display: grid; grid-template-columns: 1fr auto; gap: .3em .6em; align-items: center; padding: .35em 0; border-bottom: 1px solid #efe3c0; }
+.baas-rij:last-child { border-bottom: 0; }
+.baas-rij .baas-fn { font-weight: 700; }
+.baas-rij select { width: auto; min-width: 9em; }
+.baas-rij .check { grid-column: 1 / -1; margin: 0; font-size: .9rem; }
+.baas-over { margin-top: .5em; background: #fbf1d3; border-radius: 8px; padding: .4em .7em; }
+.baas-over-rij { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .3em .8em; padding: .2em 0; }
+.baas-over-rij .check { margin: 0; font-size: .88rem; }
+.baas-inhuur { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .3em; }
+.inhuur-vooraf { margin-top: .5em; padding-top: .5em; border-top: 1px solid #efe3c0; }
+.inhuur-vooraf .rij > * { margin: 0; }
