@@ -371,6 +371,27 @@
     </div>`;
   }
 
+  // Voorlopige indeling tijdens een lopende uitvraag: per functie wie er nu op zou staan en wat nog open is
+  function voorlopigIndelingHtml(e) {
+    const ds = (voorlopig().perEvent[e.id] || []).slice().sort((a, b) => a.functie.localeCompare(b.functie) || !a.medewerker_id - !b.medewerker_id);
+    if (!ds.length) return '';
+    const open = ds.filter(x => !x.medewerker_id), fns = [...new Set(ds.map(x => x.functie))];
+    const bev = new Set(A.data.event_reacties.filter(r => r.event_id === e.id && r.kan && r.bevestigd_functie).map(r => r.medewerker_id));
+    const nodig = fns.map(f => [f, open.filter(x => x.functie === f).length]).filter(([, n]) => n);
+    const naam = x => { const m = A.mw(x.medewerker_id);
+      const teken = A.isBeheer(m) ? '⭐ ' : G.isInhuur(m) ? '🧑‍🍳 ' : bev.has(m.id) ? '🔒 ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`;
+      return `<span class="indeling-naam${A.isBeheer(m) ? ' baas' : ''}">${teken}${esc(m.naam)}</span>`; };
+    return `<div class="indeling">
+      <div class="indeling-kop"><b>📋 Zo staat het nu (voorlopig)</b>
+        <span class="label ${open.length ? 'fout' : 'ok'}">${open.length ? `nog ${open.length} in te vullen` : 'alles ingevuld'}</span></div>
+      ${nodig.length ? `<p style="margin:.2em 0 .5em;color:var(--fout);font-weight:700">Nog nodig: ${nodig.map(([f, n]) => `${n}× ${esc(f)}`).join(', ')}</p>` : ''}
+      ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
+        return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
+          <div class="indeling-namen">${rij.map(x => x.medewerker_id ? naam(x) : '<span class="indeling-naam open">Open</span>').join('')}</div></div>`; }).join('')}
+      <p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Met de reacties van nu; vast personeel telt mee. 🔒 = bevestigd · ⭐ = ${esc(beheerNaam())} · 🧑‍🍳 = inhuur. Wie nog niet reageerde, staat hier niet bij. Pas na "Nu inplannen" (of na de termijn) kun je schuiven.</p>
+    </div>`;
+  }
+
   // De baas zelf als 'medewerker' (niet actief: geen inlog, geen uitvragen of meldingen), zodat hij zichzelf kan inzetten
   const beheerNaam = () => A.data.instellingen.beheer_naam || 'Beheer';
   const beheerMw = () => A.data.medewerkers.find(m => A.isBeheer(m));
@@ -1196,7 +1217,7 @@
         return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>${r.aangeboden ? ` <span class="label let">🔁 ${r.overname_door ? esc(A.mwNaam(r.overname_door)) + ' wil overnemen' : 'aangeboden'}</span>` : ''}` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
         <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
-        ${e.status === 'concept' || e.status === 'ingepland' ? indelingHtml(e) : ''}
+        ${e.status === 'concept' || e.status === 'ingepland' ? indelingHtml(e) : e.status === 'open' ? voorlopigIndelingHtml(e) : ''}
         ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
         ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de uitvraag gaat weer open. Reacties blijven staan.</small></div>' : ''}
         ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
