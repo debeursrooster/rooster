@@ -1,10 +1,25 @@
-// Service worker: pushmeldingen tonen en de app installeerbaar maken.
+// Service worker: pushmeldingen tonen, de app installeerbaar maken en nieuwe versies melden.
 // Er wordt bewust niets gecachet, zodat je altijd de nieuwste versie ziet.
-self.addEventListener('install', () => self.skipWaiting());
+//
+// NIEUWE VERSIE UITBRENGEN: verhoog VERSIE hieronder én "versie" in versie.json.
+// Wie de app open heeft, krijgt dan bovenin "Nieuwe versie beschikbaar" met een knop Bijwerken.
+const VERSIE = '1.0';
+
+// Pas overnemen als er op "Bijwerken" getikt wordt
+self.addEventListener('install', () => {});
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+self.addEventListener('message', e => {
+  if (!e.data) return;
+  if (e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data.type === 'GET_VERSION' && e.ports[0]) e.ports[0].postMessage(VERSIE);
+});
 
 self.addEventListener('fetch', e => {
-  if (e.request.mode === 'navigate') e.respondWith(fetch(e.request));
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;   // Supabase e.d. ongemoeid
+  if (req.headers.has('range')) return;
+  // Altijd bij GitHub controleren of er iets nieuws is (geen verouderde bestanden uit de browsercache)
+  e.respondWith(fetch(req, { cache: 'no-cache' }).catch(() => fetch(req)));
 });
 
 self.addEventListener('push', e => {

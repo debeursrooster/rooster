@@ -143,3 +143,21 @@ supabase/schema.sql   database aanmaken
 scripts/auto-rooster.cjs        automatisch rooster (GitHub Actions)
 .github/workflows/auto-rooster.yml
 ```
+
+---
+
+## Een nieuwe versie uitbrengen
+
+Wie de app open heeft staan, ziet bovenin **Nieuwe versie beschikbaar** met de knoppen **Bijwerken** en **Later**, zodra er een nieuwe versie op GitHub staat.
+
+Zo breng je een update uit:
+
+1. Pas je bestanden aan.
+2. Verhoog het versienummer op **twee** plekken, met hetzelfde nummer:
+   - `sw.js`, bovenaan: `const VERSIE = '1.1';`
+   - `versie.json`: `"versie": "1.1"`, en zet bij `"nieuw"` in één zin wat er veranderd is.
+3. Upload de bestanden naar GitHub.
+
+Het huidige versienummer staat in het beheer onder **Uitloggen**, en op de inlogpagina van het personeel onder **Beheer**.
+
+De `?v=35` achter de scripts mag blijven staan, maar hoeft niet meer opgehoogd te worden: de app haalt de bestanden nu altijd vers op.
