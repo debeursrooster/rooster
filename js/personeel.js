@@ -158,7 +158,7 @@
   function dienstItem(d, knoppen, klasse, status) {
     const ev = d.event_id && A.event(d.event_id);
     const ruil = actieveRuil(d.id);
-    const collegas = A.data.diensten.filter(x => x.datum === d.datum && x.id !== d.id && x.medewerker_id && x.locatie === d.locatie && G.overlap(x, d)).map(x => A.mwNaam(x.medewerker_id));
+    const collegas = A.data.diensten.filter(x => x.datum === d.datum && x.id !== d.id && x.medewerker_id && x.locatie === d.locatie && G.overlap(x, d)).map(x => A.mwNaam(x.medewerker_id)).filter((n, i, l) => l.indexOf(n) === i);
     return `<div class="item ${klasse || ''}"><div class="datumblok ${d.locatie}"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
       <div style="min-width:0"><div class="wie">${tijd(d)} <span class="label ${d.locatie === 'zalen' ? 'zaal' : 'caf'}">${A.LOC[d.locatie]}</span></div>
       <div class="meta">${esc(A.datumLang(d.datum))} · ${esc(d.functie)}${ev ? ' · 🎉 ' + esc(ev.naam) : ''}</div>
@@ -244,13 +244,13 @@
                 ${st === 'leeg' ? '<small class="k3-hint">Nog niet gekozen</small>' : ''}</div>`; })()}</div>`; };
     zetGezien(uitvragen);
     $('#inhoud').innerHTML = `
+      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', (A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ Nu doet ${esc(A.mwNaam(d.medewerker_id))} deze plek</div>` : '') + ((A.data.event_reacties.find(r => d.event_id && r.event_id === d.event_id && r.medewerker_id === ik.id) || {}).kan === false ? '<div class="meta"><b>Kun je toch? Dan kun je deze dienst nog oppakken.</b></div>' : ''))).join('')}</div>` : ''}
       ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Schuif naar rechts (groen) als je kunt, naar links (rood) als je niet kunt. Kun je, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
         ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
       ${cafMaanden.map(mnd => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">${gs[0].extra ? 'Je vaste diensten staan (grijs) bij Mijn diensten. Wil je extra werken? Zet de schuif naar rechts bij de diensten die je erbij wilt; laat hem staan als je geen extra wilt.' : 'Het voorlopige rooster is gemaakt. Deze diensten zijn nog open. Schuif naar rechts als je kunt, naar links als je niet kunt.'} Kiezen kan t/m <b>${esc(A.datumLang(gs[0].tot))}</b>; daarna wordt het werk eerlijk verdeeld (wie het eerst reageert, krijgt geen voorrang).</p>
         ${gs.map(cafItem).join('')}</div>`; }).join('')}
-      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', (A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ ${esc(A.mwNaam(d.medewerker_id))} vult deze plek nu zelf in – kun jij? Dan neem je hem over</div>` : '') + ((A.data.event_reacties.find(r => d.event_id && r.event_id === d.event_id && r.medewerker_id === ik.id) || {}).kan === false ? '<div class="meta zacht">Je had gezegd dat je niet kon. Kun je nu toch? Dan kun je hem oppakken.</div>' : '') + (evConcept(d) ? '<div class="meta zacht">Het rooster van dit feest is nog niet verstuurd. Pak je hem op, dan sta je er voorlopig op.</div>' : ''))).join('')}</div>` : ''}
       ${!uitvragen.length && !open.length && !caf.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
     koppelActies();
     const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
