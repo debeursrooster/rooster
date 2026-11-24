@@ -25,6 +25,8 @@
   // De baas zelf (niet-actieve medewerker met notitie 'Beheer'): zijn plekken blijven open voor personeel
   App.isBeheer = m => !!m && /^beheer/i.test(m.notitie || '');
   App.beheerPlek = d => !!d && !!d.medewerker_id && App.isBeheer(App.mw(d.medewerker_id));
+  // Plek van de baas die het personeel mag overnemen (per functie in te stellen; standaard ja)
+  App.baasOverneembaar = d => App.beheerPlek(d) && G.baasOverneembaar(d, d.event_id && App.event(d.event_id));
   // Wie staat er bij dit feest op twee (of meer) plekken tegelijk? → [{ m, ds }]
   App.dubbelOpFeest = evId => {
     const ds = App.data.diensten.filter(x => x.event_id === evId && x.medewerker_id), uit = [];

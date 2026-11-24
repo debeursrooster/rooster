@@ -362,9 +362,11 @@
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
           <div class="indeling-namen">${rij.map(x => { const m = A.mw(x.medewerker_id);
             const attr = wijzig ? ` data-wissel="${x.id}" role="button" tabindex="0" title="Klik om iemand anders op deze plek te zetten"` : '';
-            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? '⭐ ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
+            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? (G.baasOverneembaar(x, e) ? '⭐ ' : '⭐🔒 ') : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
                      : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
-      ${baas ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">⭐ = ${esc(beheerNaam())} zelf. Die plekken blijven open staan voor het personeel: wie toch kan, kan zo'n plek oppakken.</p>` : ''}
+      ${baas ? `<div class="baas-over">${[...new Set(ds.filter(x => A.beheerPlek(x)).map(x => x.functie))].map(f => { const mag = G.baasOverneembaar({ functie: f }, e);
+          return `<div class="baas-over-rij"><span>⭐ <b>${esc(f)}</b></span><label class="check"><input type="checkbox" data-baasfn="${esc(f)}" ${mag ? 'checked' : ''}> Personeel mag overnemen</label></div>`; }).join('')}
+        <p class="zacht" style="font-size:.8rem;margin:.3em 0 0">⭐ = ${esc(beheerNaam())} zelf. Met een vinkje blijft de plek open staan voor het personeel: wie toch kan, kan hem oppakken. Zonder vinkje (🔒) houd je de plek zelf.</p></div>` : ''}
       ${wijzig ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. ${e.status === 'ingepland' ? 'Het is al verstuurd: wie erbij komt, eraf gaat of een andere taak krijgt, krijgt meteen een melding.' : 'Pas na "Versturen naar personeel" krijgt iedereen een melding.'}</p>` : ''}
     </div>`;
   }
@@ -372,6 +374,29 @@
   // De baas zelf als 'medewerker' (niet actief: geen inlog, geen uitvragen of meldingen), zodat hij zichzelf kan inzetten
   const beheerNaam = () => A.data.instellingen.beheer_naam || 'Beheer';
   const beheerMw = () => A.data.medewerkers.find(m => A.isBeheer(m));
+
+  // Ingehuurde kracht: aparte niet-actieve medewerker (geen uitvragen, meldingen of inlog)
+  async function zorgInhuurMw(naam, tel, functie) {
+    let m = A.data.medewerkers.find(x => G.isInhuur(x) && x.naam.toLowerCase() === naam.toLowerCase());
+    if (!m) {
+      m = { id: Store.uuid(), naam, pin: '', telefoon: tel || '', email: '', functies: [functie], locaties: ['zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 7, kleur: '#8d99ae', actief: false, in_dienst_sinds: null, notitie: 'Inhuur', liever_niet_dagen: [] };
+      await Store.insert('medewerkers', m); A.data.medewerkers.push(m);
+    } else if (!(m.functies || []).includes(functie)) { m.functies = [...(m.functies || []), functie]; await Store.update('medewerkers', m.id, { functies: m.functies }); }
+    return m;
+  }
+
+  // De baas als niet-actieve medewerker aanmaken (of functies aanvullen), zodat hij op plekken kan staan
+  async function zorgBeheerMw(functies) {
+    let m = beheerMw();
+    if (!m) {
+      m = { id: Store.uuid(), naam: beheerNaam(), pin: '', telefoon: A.data.instellingen.beheer_telefoon || '', email: '', functies: functies.slice(), locaties: ['cafetaria', 'zalen'], contracturen: 0, vaste_dagen: [], vrije_dagen: [], max_dagen_week: 7, kleur: '#c9a227', actief: false, in_dienst_sinds: null, notitie: 'Beheer', liever_niet_dagen: [] };
+      await Store.insert('medewerkers', m); A.data.medewerkers.push(m);
+    } else {
+      const mist = functies.filter(f => !(m.functies || []).includes(f));
+      if (mist.length) { m.functies = [...(m.functies || []), ...mist]; await Store.update('medewerkers', m.id, { functies: m.functies }); }
+    }
+    return m;
+  }
 
   // Na een wijziging in een al verstuurd feest: wie erbij komt, eraf gaat of een andere taak krijgt een melding
   const indelingFoto = evId => A.data.diensten.filter(x => x.event_id === evId).map(x => ({ id: x.medewerker_id, f: x.functie }));
@@ -942,7 +967,7 @@
     const kleur = { goed: 'var(--ok)', bijna: 'var(--let)', wacht: '#b3a898', slecht: 'var(--fout)' }[toestand];
     const titel = { goed: '✓ Voorlopig rond', bijna: 'Voorlopig nog ' + nogOpen + ' open', wacht: 'Wacht op reacties · ' + nogOpen + ' open', slecht: 'Niemand kan · ' + nogOpen + ' open' }[toestand];
     const pct = nodig ? Math.min(100, Math.round(gevuld / nodig * 100)) : 0;
-    const vlTekst = vl.length ? `<div class="uv-voorlopig"><b>Voorlopig:</b> ${vl.slice().sort((a, b) => !a.medewerker_id - !b.medewerker_id || a.functie.localeCompare(b.functie)).map(x => x.medewerker_id ? `${esc((A.mw(x.medewerker_id) || {}).naam || '?')} <small>(${esc(x.functie)})</small>` : `<span class="fout">open (${esc(x.functie)})</span>`).join(', ')}</div>` : '';
+    const vlTekst = vl.length ? `<div class="uv-voorlopig"><b>Voorlopig:</b> ${vl.slice().sort((a, b) => !a.medewerker_id - !b.medewerker_id || a.functie.localeCompare(b.functie)).map(x => x.medewerker_id ? `${A.beheerPlek(x) ? '⭐ ' : G.isInhuur(A.mw(x.medewerker_id)) ? '🧑‍🍳 ' : ''}${esc((A.mw(x.medewerker_id) || {}).naam || '?')} <small>(${esc(x.functie)})</small>` : `<span class="fout">open (${esc(x.functie)})</span>`).join(', ')}</div>` : '';
     const namen = (lijst, cls, teken) => lijst.length ? `<span class="uv-namen ${cls}">${teken} ${lijst.map(m => esc(m.naam)).join(', ')}</span>` : '';
     return {
       toestand,
@@ -1182,6 +1207,14 @@
         <div id="eUitWrap" style="margin-top:.5em;${e.uitvraag ? '' : 'display:none'}"><label>Reageren kan tot en met</label><input type="date" id="eUitTot" value="${esc(e.uitvraag_tot || U_standaard(e.datum))}" style="max-width:200px">
         <small class="zacht" style="display:block;margin-top:.3em">Daarna wordt het feest automatisch ingepland. Zet je meerdere feesten tegelijk in, dan worden ze samen verdeeld.</small></div></div>` : '';
     function U_standaard(datum) { return Uitvraag.standaardTermijn(datum, dagenUit, nu); }
+    // Vooraf: welke plekken doet de baas zelf, en mag het personeel die overnemen? (per functie, opgeslagen in de bezetting)
+    const baasStaat = {};
+    const inhuurStaat = {};   // per functie: ids van ingehuurde krachten die al zijn afgesproken
+    for (const b of (e.bezetting || [])) { const st = baasStaat[b.functie] = baasStaat[b.functie] || { n: 0, overname: true }; st.n += +b.baas || 0; if (b.baas_overname === false) st.overname = false;
+      for (const id of (b.inhuur || [])) if (A.mw(id)) (inhuurStaat[b.functie] = inhuurStaat[b.functie] || []).push(id); }
+    const baasVooraf = nieuw || e.status === 'open' || !e.status;
+    const baasHtml = baasVooraf ? `<div class="veld baas-vooraf"><label>📌 Vooraf indelen: ${esc(beheerNaam())} zelf en inhuur</label><div id="eBaas"></div>
+      <small class="zacht" style="display:block;margin-top:.3em">Zet hier alvast op welke plek(ken) je zelf staat en wie je hebt ingehuurd. Bij het inplannen staan zij daar vast; de rest wordt eromheen verdeeld. Ingehuurde krachten worden nooit aan het personeel aangeboden. Oproepkrachten alvast vastzetten doe je hieronder met "Bevestigen" bij wie "kan" heeft gezegd.</small></div>` : '';
     const html = `
       <div class="veld"><label>Naam van het feest</label><input id="eNaam" value="${esc(e.naam)}" placeholder="bv. Bruiloft Jansen"></div>
       <div class="rij"><div class="veld"><label>Datum</label><input type="date" id="eDatum" value="${esc(e.datum)}"></div>
@@ -1192,9 +1225,60 @@
         <div id="bezRijen">${(e.bezetting || []).map(rijHtml).join('')}</div>
         <button class="knop klein" id="eRij" type="button">+ Functie</button> <small class="zacht">* alleen invullen als het afwijkt van de feesttijden</small></div>
       ${uitvraagHtml}
+      ${baasHtml}
       ${reactieHtml}
       <div class="veld"><label>Notitie</label><textarea id="eNot" placeholder="Bijzonderheden, menu, contactpersoon…">${esc(e.notitie || '')}</textarea></div>`;
-    const leesBez = bg => [...bg.querySelectorAll('.bez-rij')].map(r => ({ functie: r.querySelector('.bFn').value, aantal: +r.querySelector('.bAantal').value || 0, start: r.querySelector('.bStart').value || undefined, eind: r.querySelector('.bEind').value || undefined })).filter(b => b.aantal > 0);
+    const leesBez0 = bg => [...bg.querySelectorAll('.bez-rij')].map(r => ({ functie: r.querySelector('.bFn').value, aantal: +r.querySelector('.bAantal').value || 0, start: r.querySelector('.bStart').value || undefined, eind: r.querySelector('.bEind').value || undefined })).filter(b => b.aantal > 0);
+    // baas-instellingen per functie weer over de rijen verdelen
+    const leesBez = bg => {
+      const bez = leesBez0(bg), rest = {};
+      for (const b of bez) {
+        const st = baasStaat[b.functie];
+        if (!st) { if (!(b.functie in rest)) rest[b.functie] = 0; continue; }
+        if (!(b.functie in rest)) rest[b.functie] = st.n;
+        const n = Math.min(rest[b.functie], b.aantal);
+        if (n > 0) { b.baas = n; rest[b.functie] -= n; }
+        if (st.overname === false) b.baas_overname = false;
+      }
+      const inhRest = {};
+      for (const b of bez) {
+        if (!(b.functie in inhRest)) inhRest[b.functie] = (inhuurStaat[b.functie] || []).slice();
+        const ruimte = Math.max(0, b.aantal - (+b.baas || 0));
+        if (ruimte && inhRest[b.functie].length) b.inhuur = inhRest[b.functie].splice(0, ruimte);
+      }
+      return bez;
+    };
+    const tekenBaas = bg => {
+      const vak = bg.querySelector('#eBaas'); if (!vak) return;
+      const tot = {};
+      for (const b of leesBez0(bg)) tot[b.functie] = (tot[b.functie] || 0) + b.aantal;
+      const fns = Object.keys(tot);
+      vak.innerHTML = fns.length ? fns.map(f => { const st = baasStaat[f] || { n: 0, overname: true }, n = Math.min(st.n, tot[f]);
+        return `<div class="baas-rij"><span class="baas-fn">${esc(f)}</span>
+          <select data-bn="${esc(f)}">${Array.from({ length: tot[f] + 1 }, (_, k) => `<option value="${k}" ${k === n ? 'selected' : ''}>${k ? (k === 1 ? 'ik doe 1 plek' : `ik doe ${k} plekken`) : 'nee'}</option>`).join('')}</select>
+          <label class="check" style="${n ? '' : 'display:none'}"><input type="checkbox" data-bov="${esc(f)}" ${st.overname !== false ? 'checked' : ''}> Personeel mag overnemen</label>
+          ${(inhuurStaat[f] || []).length ? `<div class="baas-inhuur">${inhuurStaat[f].map(id => `<span class="indeling-naam">🧑‍🍳 ${esc(A.mwNaam(id))} <small class="zacht">inhuur</small><button type="button" class="chip-weg" data-inweg="${esc(f)}|${id}" aria-label="weghalen">✕</button></span>`).join('')}</div>` : ''}</div>`; }).join('')
+          + `<div class="inhuur-vooraf"><b>🧑‍🍳 Iemand ingehuurd?</b>
+            <div class="rij" style="grid-template-columns:1fr 1.3fr;gap:.4em;margin-top:.3em"><select id="ivFn">${fns.map(f => `<option>${esc(f)}</option>`).join('')}</select><input id="ivNaam" list="ivLijst" placeholder="Naam, bv. Jan (uitzendbureau)"></div>
+            <div class="rij" style="grid-template-columns:1fr auto;gap:.4em;margin-top:.3em"><input id="ivTel" type="tel" placeholder="Telefoon (optioneel)"><button type="button" class="knop klein" id="ivPlus">+ Toevoegen</button></div>
+            <datalist id="ivLijst">${A.data.medewerkers.filter(G.isInhuur).map(m => `<option value="${esc(m.naam)}">`).join('')}</datalist></div>`
+        : '<p class="zacht" style="margin:.2em 0">Vul eerst het benodigd personeel in.</p>';
+      vak.querySelectorAll('[data-bn]').forEach(x => x.onchange = () => { const f = x.dataset.bn, st = baasStaat[f] = baasStaat[f] || { n: 0, overname: true }; st.n = +x.value;
+        const inh = inhuurStaat[f] || []; if (st.n + inh.length > tot[f]) { inhuurStaat[f] = inh.slice(0, Math.max(0, tot[f] - st.n)); A.toast(`Niet genoeg plekken ${f}: inhuur ingekort`, 'fout'); }
+        tekenBaas(bg); });
+      vak.querySelectorAll('[data-bov]').forEach(x => x.onchange = () => { const st = baasStaat[x.dataset.bov] = baasStaat[x.dataset.bov] || { n: 0, overname: true }; st.overname = x.checked; });
+      vak.querySelectorAll('[data-inweg]').forEach(x => x.onclick = () => { const [f, id] = x.dataset.inweg.split('|'); inhuurStaat[f] = (inhuurStaat[f] || []).filter(y => y !== id); tekenBaas(bg); });
+      const plus = vak.querySelector('#ivPlus');
+      if (plus) plus.onclick = async () => {
+        const f = vak.querySelector('#ivFn').value, naam = vak.querySelector('#ivNaam').value.trim(), tel = vak.querySelector('#ivTel').value.trim();
+        if (!naam) return A.toast('Vul de naam in van wie je inhuurt', 'fout');
+        const lijst = inhuurStaat[f] = inhuurStaat[f] || [];
+        if (lijst.length + Math.min((baasStaat[f] || {}).n || 0, tot[f]) >= tot[f]) return A.toast(`Alle plekken ${f} zijn al vooraf ingedeeld`, 'fout');
+        const m = await zorgInhuurMw(naam, tel, f);
+        if (lijst.includes(m.id)) return A.toast(m.naam + ' staat al op ' + f, 'fout');
+        lijst.push(m.id); tekenBaas(bg);
+      };
+    };
     const knoppen = [];
     if (!nieuw) knoppen.push({ label: 'Verwijderen', soort: 'gevaar', waarde: 'weg' });
     knoppen.push({ label: 'Annuleren', waarde: null }, {
@@ -1214,8 +1298,17 @@
       }
     });
     const res = await A.modal(nieuw ? 'Feest toevoegen' : 'Feest bewerken', html, knoppen, bg => {
-      const koppel = () => bg.querySelectorAll('.bWeg').forEach(b => b.onclick = ev2 => { ev2.preventDefault(); b.closest('.bez-rij').remove(); });
+      const koppel = () => { bg.querySelectorAll('.bWeg').forEach(b => b.onclick = ev2 => { ev2.preventDefault(); b.closest('.bez-rij').remove(); tekenBaas(bg); }); tekenBaas(bg); };
       koppel();
+      bg.querySelector('#bezRijen').addEventListener('change', () => tekenBaas(bg));
+      // per functie instellen of het personeel de plek van de baas mag overnemen (na het inplannen)
+      bg.querySelectorAll('[data-baasfn]').forEach(k => k.onchange = async () => {
+        const ev0 = A.event(e.id), f = k.dataset.baasfn;
+        const bez = (ev0.bezetting || []).map(b => { if (b.functie !== f) return b; const c = { ...b }; if (k.checked) delete c.baas_overname; else c.baas_overname = false; return c; });
+        await Store.update('zalen_events', ev0.id, { bezetting: bez });
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
+        A.toast(k.checked ? `${f}: personeel mag je plek overnemen` : `${f}: je houdt deze plek zelf`, 'ok');
+      });
       bg.querySelector('#eRij').onclick = () => { bg.querySelector('#bezRijen').insertAdjacentHTML('beforeend', rijHtml({ functie: 'Bediening', aantal: 1 }, 0)); koppel(); };
       bg.querySelector('#eStandaard').onclick = () => { bg.querySelector('#bezRijen').innerHTML = standaardBezetting(bg.querySelector('#eGasten').value).map(rijHtml).join(''); koppel(); };
       if (nieuw) bg.querySelector('#eGasten').addEventListener('change', () => { if (!bg.querySelectorAll('.bez-rij').length) bg.querySelector('#eStandaard').click(); });
@@ -1285,6 +1378,8 @@
         const ds = A.data.diensten.filter(x => x.event_id === ev0.id), mensen = ds.filter(x => x.medewerker_id);
         const verstuurd = ev0.status === 'ingepland';
         if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${ev0.naam} vervalt${verstuurd && mensen.length ? ` en ${mensen.length} ${mensen.length === 1 ? 'persoon krijgt' : 'mensen krijgen'} daar een melding van` : ''}. De uitvraag gaat weer open t/m ${A.datumLang(tot)}. Wie al heeft gereageerd, hoeft dat niet opnieuw te doen.`, 'Ongedaan maken')) return;
+        const bezInh = G.inhuurInBezetting(ev0.bezetting, ds, A.data);
+        await Store.update('zalen_events', ev0.id, { bezetting: bezInh });
         for (const x of ds) {
           await Store.remove('diensten', x.id);
           if (verstuurd && x.medewerker_id) await A.melding(x.medewerker_id, `↩ De indeling van ${ev0.naam} (${A.datumLang(ev0.datum)}) is teruggedraaid. Je dienst staat nog niet vast; de uitvraag loopt weer t/m ${A.datumLang(tot)}. Je reactie blijft staan.`);
@@ -1311,6 +1406,9 @@
       await Store.remove('zalen_events', e.id);
       await herlaad(); opnieuw(); A.toast('Feest verwijderd'); return;
     }
+    // baas werkt zelf mee: zorg dat hij als (niet-actieve) medewerker bestaat
+    const baasFns = [...new Set((res.bezetting || []).filter(b => +b.baas > 0).map(b => b.functie))];
+    if (baasFns.length) await zorgBeheerMw(baasFns);
     // Nieuwe uitvraag starten?
     const startUitvraag = res.uitvraag && (nieuw || !ev.uitvraag || !ev.status) && !['ingepland', 'concept'].includes(res.status);
     if (startUitvraag) { res.status = 'open'; res.herinnerd = false; }
@@ -1353,6 +1451,9 @@
 
   // Plant de diensten voor één feest opnieuw; probeert dezelfde mensen te houden
   async function herplanEvent(ev, oude) {
+    // wie ingehuurd is, blijft staan (die zijn afgesproken)
+    const bez = G.inhuurInBezetting(ev.bezetting, oude, A.data);
+    if (JSON.stringify(bez) !== JSON.stringify(ev.bezetting || [])) { await Store.update('zalen_events', ev.id, { bezetting: bez }); ev = { ...ev, bezetting: bez }; }
     for (const x of oude) await Store.remove('diensten', x.id);
     await herlaad();
     const maand = G.monthOf(ev.datum);
@@ -1367,6 +1468,8 @@
     for (const s of slots) {
       const dienst = { id: Store.uuid(), maand, datum: s.datum, locatie: 'zalen', event_id: ev.id, start: s.start, eind: s.eind, functie: s.functie, medewerker_id: null, notitie: '' };
       const kand = G.kandidaten(ctx, dienst).filter(k => k.ok);
+      if (s.baas && beheerMw()) { dienst.medewerker_id = beheerMw().id; nieuw.push(dienst); continue; }
+      if (s.inhuur && A.mw(s.inhuur)) { dienst.medewerker_id = s.inhuur; const oi = vrijeOude.findIndex(o => o.medewerker_id === s.inhuur); if (oi >= 0) vrijeOude.splice(oi, 1); nieuw.push(dienst); continue; }
       // eerst iemand die er al stond met dezelfde functie
       const idx = vrijeOude.findIndex(o => o.functie === s.functie && kand.some(k => k.m.id === o.medewerker_id));
       if (idx >= 0) { dienst.medewerker_id = vrijeOude[idx].medewerker_id; vrijeOude.splice(idx, 1); }

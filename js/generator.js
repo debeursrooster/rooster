@@ -68,13 +68,33 @@
   G.eventSlots = function (e) {
     const out = [];
     for (const b of (e.bezetting || [])) {
+      // baas = zoveel plekken van deze rij doet de baas zelf (vooraf ingedeeld)
+      // inhuur = ids van ingehuurde krachten die vooraf zijn afgesproken (staan daarna vast)
+      const baas = Math.min(+b.baas || 0, +b.aantal || 0), inh = (b.inhuur || []).slice(0, Math.max(0, (+b.aantal || 0) - baas));
       for (let i = 0; i < (+b.aantal || 0); i++)
-        out.push({ datum: e.datum, locatie: 'zalen', event_id: e.id, start: b.start || e.start, eind: b.eind || e.eind, functie: b.functie });
+        out.push({ datum: e.datum, locatie: 'zalen', event_id: e.id, start: b.start || e.start, eind: b.eind || e.eind, functie: b.functie, baas: i < baas, inhuur: i >= baas ? inh[i - baas] || null : null });
     }
     return out;
   };
 
   // Een feest met lopende uitvraag of al ingeplande uitvraag wordt niet door het maandrooster aangeraakt
+  // De baas zelf: niet-actieve medewerker met notitie 'Beheer'
+  G.isBeheer = m => !!m && /^beheer/i.test(m.notitie || '');
+  G.isInhuur = m => !!m && /^inhuur/i.test(m.notitie || '');
+  // Wie er nu ingehuurd op een feest staat, weer in de bezetting zetten (zodat herplannen of terugdraaien ze niet kwijtraakt)
+  G.inhuurInBezetting = function (bezetting, diensten, data) {
+    const per = {};
+    for (const d of diensten) { const m = (data.medewerkers || []).find(x => x.id === d.medewerker_id); if (G.isInhuur(m)) (per[d.functie] = per[d.functie] || []).push(m.id); }
+    return (bezetting || []).map(b => {
+      const c = { ...b }; delete c.inhuur;
+      const lijst = per[b.functie] || [], ruimte = Math.max(0, (+b.aantal || 0) - (+b.baas || 0));
+      if (lijst.length && ruimte) c.inhuur = lijst.splice(0, ruimte);
+      return c;
+    });
+  };
+  G.beheerMw = data => (data.medewerkers || []).find(G.isBeheer) || null;
+  // Mag het personeel een plek van de baas overnemen? (per functie in te stellen bij het feest; standaard ja)
+  G.baasOverneembaar = (d, e) => !(e && (e.bezetting || []).some(b => b.functie === d.functie && b.baas_overname === false));
   G.eventVast = e => !!e && ['open', 'concept', 'ingepland'].includes(e.status);
   G.isOproep = m => !(+m.contracturen > 0);
   // Cafetaria: wie geen contracturen én geen vaste werkdagen heeft, kiest zelf uit de open diensten (uitvraag)
@@ -429,6 +449,11 @@
 
     // 0: door de baas bevestigde mensen staan vast op hun feest (en worden daarna niet meer verschoven)
     const vast = new Array(n).fill(false);
+    // plekken die de baas vooraf zelf heeft genomen
+    const baas = G.beheerMw(data);
+    if (baas) slots.forEach((s, i) => { if (s.baas) { wie[i] = baas.id; diensten[i].medewerker_id = baas.id; vast[i] = true; } });
+    // en ingehuurde krachten die al zijn afgesproken
+    slots.forEach((s, i) => { if (!wie[i] && s.inhuur && (data.medewerkers || []).some(m => m.id === s.inhuur)) { wie[i] = s.inhuur; diensten[i].medewerker_id = s.inhuur; vast[i] = true; } });
     for (const r of (data.event_reacties || []).filter(r => r.kan && r.bevestigd_functie && r.event_id)) {
       const m = perId[r.medewerker_id]; if (!m) continue;
       let i = diensten.findIndex((d, k) => !wie[k] && d.event_id === r.event_id && d.functie === r.bevestigd_functie);
@@ -500,7 +525,7 @@
 
     // beste oplossing terugzetten
     const eind = {}; for (const m of mws) eind[m.id] = (ctx.perMw[m.id] ? ctx.perMw[m.id].diensten : []).slice();
-    diensten.forEach((d, i) => { d.medewerker_id = besteWie[i]; if (besteWie[i]) eind[besteWie[i]].push(d); });
+    diensten.forEach((d, i) => { d.medewerker_id = besteWie[i]; if (besteWie[i] && eind[besteWie[i]]) eind[besteWie[i]].push(d); });
 
     const result = diensten.slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0) || G.min(a.start) - G.min(b.start) || a.locatie.localeCompare(b.locatie));
     for (const d of result) if (!d.medewerker_id && !(ctx.cafFase === 'vast' && d.locatie === 'cafetaria')) meldingen.push('Geen geschikte medewerker voor ' + d.functie + ' op ' + d.datum + ' (' + d.start + '-' + d.eind + ', ' + d.locatie + ')');
