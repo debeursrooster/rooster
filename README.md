@@ -148,7 +148,9 @@ scripts/auto-rooster.cjs        automatisch rooster (GitHub Actions)
 
 ## Een nieuwe versie uitbrengen
 
-Wie de app open heeft staan, ziet bovenin **Nieuwe versie beschikbaar** met de knoppen **Bijwerken** en **Later**, zodra er een nieuwe versie op GitHub staat.
+Iedereen ziet bovenin **Nieuwe versie beschikbaar** met de knoppen **Bijwerken** en **Later**, zodra er een nieuwe versie op GitHub staat.
+
+Kiest iemand **Later**, dan blijft hij op de oude versie en komt de vraag terug bij elke keer dat de app geopend wordt, tot hij op **Bijwerken** tikt.
 
 Zo breng je een update uit:
 
@@ -160,4 +162,4 @@ Zo breng je een update uit:
 
 Het huidige versienummer staat in het beheer onder **Uitloggen**, en op de inlogpagina van het personeel onder **Beheer**.
 
-De `?v=35` achter de scripts mag blijven staan, maar hoeft niet meer opgehoogd te worden: de app haalt de bestanden nu altijd vers op.
+Let op: de app-bestanden (html, js, css) worden nu per versie bewaard. Een wijziging komt dus pas bij het personeel aan als je het versienummer verhoogt. Alleen `js/config.js` wordt altijd vers opgehaald. De `?v=35` achter de scripts hoef je niet meer op te hogen.
