@@ -1256,7 +1256,7 @@
       for (const b of bez) {
         const st = baasStaat[b.functie];
         if (!st) { if (!(b.functie in rest)) rest[b.functie] = 0; continue; }
-        if (!(b.functie in rest)) rest[b.functie] = st.n;
+        if (!(b.functie in rest)) rest[b.functie] = Math.min(st.n, 1);
         const n = Math.min(rest[b.functie], b.aantal);
         if (n > 0) { b.baas = n; rest[b.functie] -= n; }
         if (st.overname === false) b.baas_overname = false;
@@ -1274,9 +1274,9 @@
       const tot = {};
       for (const b of leesBez0(bg)) tot[b.functie] = (tot[b.functie] || 0) + b.aantal;
       const fns = Object.keys(tot);
-      vak.innerHTML = fns.length ? fns.map(f => { const st = baasStaat[f] || { n: 0, overname: true }, n = Math.min(st.n, tot[f]);
+      vak.innerHTML = fns.length ? fns.map(f => { const st = baasStaat[f] || { n: 0, overname: true }, n = Math.min(st.n, tot[f], 1);
         return `<div class="baas-rij"><span class="baas-fn">${esc(f)}</span>
-          <select data-bn="${esc(f)}">${Array.from({ length: tot[f] + 1 }, (_, k) => `<option value="${k}" ${k === n ? 'selected' : ''}>${k ? (k === 1 ? 'ik doe 1 plek' : `ik doe ${k} plekken`) : 'nee'}</option>`).join('')}</select>
+          <select data-bn="${esc(f)}"><option value="0" ${n ? '' : 'selected'}>Nee</option><option value="1" ${n ? 'selected' : ''}>Ik doe deze</option></select>
           <label class="check" style="${n ? '' : 'display:none'}"><input type="checkbox" data-bov="${esc(f)}" ${st.overname !== false ? 'checked' : ''}> Personeel mag overnemen</label>
           ${(inhuurStaat[f] || []).length ? `<div class="baas-inhuur">${inhuurStaat[f].map(id => `<span class="indeling-naam">🧑‍🍳 ${esc(A.mwNaam(id))} <small class="zacht">inhuur</small><button type="button" class="chip-weg" data-inweg="${esc(f)}|${id}" aria-label="weghalen">✕</button></span>`).join('')}</div>` : ''}</div>`; }).join('')
           + `<div class="inhuur-vooraf"><b>🧑‍🍳 Iemand ingehuurd?</b>
