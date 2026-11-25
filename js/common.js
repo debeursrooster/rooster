@@ -58,9 +58,14 @@
 
   App.reload = async function () {
     App.data = await Store.loadAll();
+    // Geannuleerde feesten (bewaard voor de statistiek) apart zetten, dan ziet de rest van de app ze niet
+    App.data.geannuleerd = (App.data.zalen_events || []).filter(e => e.status === 'geannuleerd');
+    App.data.zalen_events = (App.data.zalen_events || []).filter(e => e.status !== 'geannuleerd');
+    if (App.data.instellingen) G.pasFunctiesToe(App.data);
     if (!App.data.instellingen) {
       if (Store.modus === 'demo') { await App.seedDemo(); App.data = await Store.loadAll(); }
       else { await Store.insert('instellingen', { id: 1 }); App.data = await Store.loadAll(); }
+      G.pasFunctiesToe(App.data);
     }
     return App.data;
   };
@@ -70,7 +75,7 @@
     const e = App.event(r.event_id), f = r.bevestigd_functie, tijd = new Date().toISOString();
     const eigen = App.data.event_reacties.find(x => x.event_id === e.id && x.medewerker_id === naarId);
     if (eigen) await Store.update('event_reacties', eigen.id, { kan: true, bevestigd_functie: f, aangeboden: false, overname_door: null, tijd });
-    else await Store.insert('event_reacties', { event_id: e.id, medewerker_id: naarId, kan: true, opmerking: '', tijd, bevestigd_functie: f, aangeboden: false });
+    else await Store.insert('event_reacties', { event_id: e.id, medewerker_id: naarId, kan: true, opmerking: '', tijd, eerste_tijd: tijd, bevestigd_functie: f, aangeboden: false });
     await Store.update('event_reacties', r.id, { kan: false, bevestigd_functie: null, aangeboden: false, overname_door: null });
   };
   App.feestOmschr = (e, f) => `${e.naam} op ${App.datumLang(e.datum)} (${e.start}–${e.eind}${f && f !== 'bevestigd' ? ', ' + f : ''})`;
@@ -245,13 +250,13 @@
       i % 2 ? [{ functie: 'Bediening', aantal: 1 }, { functie: 'Bar', aantal: 1 }] : [{ functie: 'Bediening', aantal: 3 }, { functie: 'Bar', aantal: 2 }, { functie: 'Afwas', aantal: 1 }])));
     // Zaterdagfeesten volgende maand via de uitvraag: de eerste is net verlopen (wordt bij openen beheer ingepland), de rest loopt nog
     const zatEvents = events.slice(-zaterdagen(volgende).length);
-    zatEvents.forEach((e, i) => Object.assign(e, { uitvraag: true, status: 'open', herinnerd: false, uitvraag_tot: i === 0 ? G.addDays(nuDag, -1) : G.addDays(nuDag, 5) }));
+    zatEvents.forEach((e, i) => Object.assign(e, { uitvraag: true, status: 'open', herinnerd: false, uitvraag_start: new Date(Date.now() - 6 * 864e5).toISOString(), uitvraag_tot: i === 0 ? G.addDays(nuDag, -1) : G.addDays(nuDag, 5) }));
     vrijdagen(volgende).slice(0, 2).forEach((d, i) => events.push(ev(d, i ? 'Uitvaart-koffietafel' : 'Personeelsfeest Gemeente', 'Kleine zaal', i ? '13:00' : '18:00', i ? '16:00' : '23:00', 80, [{ functie: 'Bediening', aantal: 2 }, { functie: 'Bar', aantal: 1 }])));
     await Store.insert('zalen_events', events);
     // reacties van oproepkrachten (Joost, Emma, Noor, Bram)
     const opr = { joost: mws[7], emma: mws[8], noor: mws[10], bram: mws[11] };
     const reac = [];
-    const r = (e, m, kan, uurGeleden) => reac.push({ event_id: e.id, medewerker_id: m.id, kan, opmerking: '', tijd: new Date(Date.now() - uurGeleden * 3600e3).toISOString() });
+    const r = (e, m, kan, uurGeleden) => reac.push({ event_id: e.id, medewerker_id: m.id, kan, opmerking: '', tijd: new Date(Date.now() - uurGeleden * 3600e3).toISOString(), eerste_tijd: new Date(Date.now() - uurGeleden * 3600e3).toISOString() });
     if (zatEvents[0]) { r(zatEvents[0], opr.joost, true, 100); r(zatEvents[0], opr.noor, true, 20); r(zatEvents[0], opr.bram, true, 50); r(zatEvents[0], opr.emma, false, 70); }
     if (zatEvents[1]) { r(zatEvents[1], opr.noor, true, 30); r(zatEvents[1], opr.emma, true, 5); }
     if (zatEvents[2]) { r(zatEvents[2], opr.joost, true, 10); r(zatEvents[2], opr.bram, false, 2); }

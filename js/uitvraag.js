@@ -77,6 +77,7 @@
     const nieuweMeldingen = [];
 
     // 1. Herinneringen (2 dagen voor het einde van de termijn)
+    data.zalen_events = (data.zalen_events || []).filter(e => e.status !== 'geannuleerd');
     for (const e of (data.zalen_events || []).filter(e => e.status === 'open' && !e.herinnerd && e.uitvraag_tot && vandaag >= G.addDays(e.uitvraag_tot, -2) && vandaag <= e.uitvraag_tot)) {
       const gereageerd = new Set(reacties.filter(r => r.event_id === e.id).map(r => r.medewerker_id));
       for (const m of G.uitvraagGroep(e, data).filter(m => !gereageerd.has(m.id))) {
@@ -107,7 +108,12 @@
         r.aangeboden = false; r.overname_door = null;
       }
       const ins = data.instellingen || {};
-      for (const e of klaar) { await store.update('zalen_events', e.id, { status: 'concept' }); e.status = 'concept'; }
+      for (const e of klaar) {
+        // wie er gevraagd was, bewaren voor de reactiestatistiek (als dat bij de start nog niet gebeurd is)
+        const upd = { status: 'concept' };
+        if (!(e.uitvraag_gevraagd || []).length) upd.uitvraag_gevraagd = G.uitvraagGroep(e, data).map(m => m.id);
+        await store.update('zalen_events', e.id, upd); Object.assign(e, upd);
+      }
       const open = res.diensten.filter(d => !d.medewerker_id);
       uit.open = open.length;
       uit.ingepland = klaar.map(e => e.naam);
@@ -189,8 +195,9 @@
     const res = G.generateVoorlopig(maand, data, opties.planner);
     await store.insert('diensten', res.diensten);
     data.diensten = (data.diensten || []).concat(res.diensten);
-    const rec = { maand, status: 'voorlopig', ronde: 1, gegenereerd_op: tijd, gepubliceerd_op: null, meldingen: res.meldingen, uitvraag_tot: plan.reagerenTot, herinnerd: false };
-    await store.insert('roosters', rec);
+    const rec = { maand, status: 'voorlopig', ronde: 1, gegenereerd_op: tijd, gepubliceerd_op: null, meldingen: res.meldingen, uitvraag_tot: plan.reagerenTot, herinnerd: false, ronde1_op: tijd };
+    const [opgeslagen] = await store.insert('roosters', rec);
+    if (opgeslagen && opgeslagen.id) rec.id = opgeslagen.id;   // nodig voor de volgende stap in dezelfde run
     (data.roosters = data.roosters || []).push(rec);
     const open = U.cafOpen(data, maand);
     const rows = [rondeMelding(tijd, `Voorlopig rooster ${maandNaam(maand)} gemaakt: de vaste krachten zijn ingepland en zien hun diensten al (grijs). ${open.length} cafetariadienst(en) staan open; vaste krachten kunnen nu extra diensten kiezen, vanaf ${datumTekst(plan.ronde2)} ook de oproepkrachten.`, { titel: 'Voorlopig rooster ' + maandNaam(maand), link: '#rooster' })];
@@ -209,7 +216,9 @@
   U.cafRonde2 = async function (store, data, maand, opties) {
     const tijd = new Date().toISOString(), r = (data.roosters || []).find(r => r.maand === maand), plan = U.maandPlanning(data, maand);
     const v = await verdeel(store, data, maand, 'extra', opties);
-    await zetRooster(store, r, { ronde: 2 });
+    // wie er gevraagd is en wanneer: voor de reactiestatistiek per medewerker
+    const gevraagd = G.cafOproepGroep(data).filter(m => U.cafOpen(data, maand).some(d => G.cafPast(m, d))).map(m => m.id);
+    await zetRooster(store, r, { ronde: 2, ronde2_op: tijd, caf_gevraagd: gevraagd });
     const open = U.cafOpen(data, maand);
     const rows = kregenMeldingen(v.gekregen, maand, tijd, 'extra');
     rows.push(rondeMelding(tijd, `Rooster ${maandNaam(maand)}: ${v.gekregen.length} extra dienst(en) naar vaste krachten. ${open.length} cafetariadienst(en) staan nog open en zijn nu ook uitgezet bij de oproepkrachten (reageren t/m ${datumTekst(r.uitvraag_tot || plan.reagerenTot)}).`, { titel: 'Rooster ' + maandNaam(maand) + ': oproepkrachten', link: '#rooster' }));
@@ -285,7 +294,8 @@
           const tijd = new Date().toISOString(), ins = data.instellingen || {};
           const status = ins.auto_publiceren ? 'gepubliceerd' : 'concept';
           const rec = { maand, status, gegenereerd_op: tijd, gepubliceerd_op: status === 'gepubliceerd' ? tijd : null, meldingen: res.meldingen };
-          await store.insert('roosters', rec); (data.roosters = data.roosters || []).push(rec);
+          const [opgeslagen] = await store.insert('roosters', rec); if (opgeslagen && opgeslagen.id) rec.id = opgeslagen.id;
+          (data.roosters = data.roosters || []).push(rec);
           const rows = [rondeMelding(tijd, `Het rooster voor ${maandNaam(maand)} is automatisch gemaakt${status === 'concept' ? ' en staat klaar om te controleren en te versturen.' : ' en verstuurd.'}`, { titel: 'Nieuw rooster ' + maandNaam(maand), link: '#rooster' })];
           if (status === 'gepubliceerd') rows.push(...U.roosterMeldingen(data, maand, tijd));
           await store.insert('meldingen', rows);

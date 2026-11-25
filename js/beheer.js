@@ -11,29 +11,52 @@
   };
 
   // ---------------- opstarten ----------------
+  // Veilige modus (supabase/beveiliging.sql): pas na de juiste beheercode komen er gegevens binnen
+  let veilig = false;
   async function start() {
-    try { await A.reload(); }
-    catch (e) {
-      document.body.innerHTML = `<div class="login"><div class="login-kaart"><h2>Kan geen verbinding maken</h2><p class="zacht">${esc(e.message)}</p><p>Controleer de gegevens in <code>js/config.js</code> en of het schema in Supabase is geplaatst.</p></div></div>`;
+    try {
+      veilig = await Store.isVeilig();
+      if (veilig) {
+        const pub = await Store.publiek();
+        $('#loginNaam').textContent = (pub && pub.bedrijfsnaam) || 'Roosterbeheer';
+        const pin = sessionStorage.getItem('rooster_admin_pin');
+        if (pin) {
+          Store.zetAuth({ rol: 'beheer', pin });
+          try { await A.reload(); return toonBeheer(); }
+          catch (e) { if (!e.auth) throw e; sessionStorage.removeItem('rooster_admin_pin'); Store.zetAuth(null); }
+        }
+      } else {
+        await A.reload();
+        $('#loginNaam').textContent = A.data.instellingen.bedrijfsnaam || 'Roosterbeheer';
+        if (sessionStorage.getItem('rooster_admin') === 'ja') return toonBeheer();
+      }
+    } catch (e) {
+      document.body.innerHTML = `<div class="login"><div class="login-kaart"><h2>Kan geen verbinding maken</h2><p class="zacht">${esc(e.message)}</p><p>Controleer de gegevens in <code>js/config.js</code> en of het schema in Supabase is geplaatst.</p><button class="knop primair" onclick="location.reload()">Opnieuw proberen</button></div></div>`;
       return;
     }
     if (Store.modus === 'demo') $('#demoBand').classList.remove('verborgen');
-    $('#loginNaam').textContent = A.data.instellingen.bedrijfsnaam || 'Roosterbeheer';
-    if (sessionStorage.getItem('rooster_admin') === 'ja') return toonBeheer();
     $('#login').classList.remove('verborgen');
     if (Store.modus === 'demo') $('#adminPin').placeholder = 'demo: 0000';
     $('#adminPin').focus();
   }
 
-  $('#loginForm').onsubmit = e => {
+  $('#loginForm').onsubmit = async e => {
     e.preventDefault();
-    if ($('#adminPin').value === String(A.data.instellingen.admin_pin)) {
-      sessionStorage.setItem('rooster_admin', 'ja');
-      $('#login').classList.add('verborgen');
-      toonBeheer();
-    } else { A.toast('Onjuiste code', 'fout'); $('#adminPin').value = ''; }
+    const pin = $('#adminPin').value;
+    try {
+      let goed = await Store.login({ rol: 'beheer', pin });
+      if (goed === null) goed = pin === String(A.data.instellingen.admin_pin);   // oude modus / demo
+      if (goed) {
+        if (veilig) { sessionStorage.setItem('rooster_admin_pin', pin); await A.reload(); }
+        else sessionStorage.setItem('rooster_admin', 'ja');
+        $('#login').classList.add('verborgen');
+        return toonBeheer();
+      }
+      A.toast('Onjuiste code', 'fout');
+    } catch (x) { A.toast(x.message || 'Inloggen lukte niet', 'fout'); }
+    $('#adminPin').value = '';
   };
-  $('#uitloggen').onclick = e => { e.preventDefault(); sessionStorage.removeItem('rooster_admin'); location.reload(); };
+  $('#uitloggen').onclick = e => { e.preventDefault(); sessionStorage.removeItem('rooster_admin'); sessionStorage.removeItem('rooster_admin_pin'); location.reload(); };
   $('#demoReset').onclick = async () => {
     if (await A.bevestig('Demo opnieuw beginnen', 'Alle demo-gegevens worden gewist en opnieuw aangemaakt.', 'Opnieuw beginnen')) { Store.reset(); location.reload(); }
   };
@@ -92,6 +115,8 @@
 
   // ---------------- helpers ----------------
   const avatar = m => m ? `<span class="avatar" style="background:${esc(m.kleur || '#999')}">${esc(m.naam[0] || '?')}</span>` : `<span class="avatar" style="background:#bbb">?</span>`;
+  const afgeleid = m => (m.functies || []).filter(f => !(m.eigen_functies || m.functies || []).includes(f));
+  const functieTekst = m => (m.eigen_functies || m.functies || []).map(esc).join(', ') + (afgeleid(m).length ? ' <span class="zacht">(+ ' + afgeleid(m).map(esc).join(', ') + ')</span>' : '');
   const locLabel = l => `<span class="label ${l === 'zalen' ? 'zaal' : 'caf'}">${A.LOC[l]}</span>`;
   const tijd = d => esc(d.start) + '–' + esc(d.eind);
   const actieveMw = () => A.data.medewerkers.filter(m => m.actief !== false).sort((a, b) => a.naam.localeCompare(b.naam));
@@ -109,62 +134,89 @@
   //  OVERZICHT
   // =====================================================================
   function pOverzicht() {
-    const d = A.data, nu = G.today(), deze = G.monthOf(nu), volgende = G.nextMonth(deze);
+    const d = A.data, nu = G.today(), volgende = G.nextMonth(G.monthOf(nu));
     const verlofOpen = d.verlof.filter(v => v.status === 'aangevraagd');
-    const ruilOpen = d.ruilverzoeken.filter(r => r.status === 'overgenomen');
-    const openDiensten = d.diensten.filter(x => !x.medewerker_id && x.datum >= nu);
-    const vlOpenNu = vlOpen(nu);
-    const rv = A.rooster(volgende);
-    const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
-    let roosterTekst, roosterSub;
-    const pl = Uitvraag.maandPlanning(d, volgende);
-    if (!rv) { roosterTekst = 'Nog niet'; roosterSub = pl.voorlopig && pl.voorlopig >= nu ? 'voorlopig op ' + A.datumKort(pl.voorlopig) : 'wordt gemaakt op ' + A.datumKort(genDatum); }
-    else if (rv.status === 'voorlopig') { roosterTekst = 'Voorlopig'; roosterSub = 'definitief op ' + A.datumKort(pl.definitief); }
-    else if (rv.status === 'concept') { roosterTekst = 'Concept'; roosterSub = 'klaar om te controleren'; }
-    else { roosterTekst = 'Online'; roosterSub = 'gepubliceerd'; }
-
-    const vandaag = d.diensten.filter(x => x.datum === nu && x.medewerker_id).sort((a, b) => G.min(a.start) - G.min(b.start));
-    const feesten = d.zalen_events.filter(e => e.datum >= nu && e.datum <= G.addDays(nu, 21)).sort((a, b) => a.datum.localeCompare(b.datum));
-    const meldingen = d.meldingen.filter(m => !m.medewerker_id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 8);
-
-    const teControleren = [];
-    for (const r of d.roosters.filter(r => r.status === 'concept')) teControleren.push(`<a class="knop ok" href="#rooster" data-maand="${r.maand}">📅 Rooster ${esc(A.maandNaam(r.maand))}</a>`);
+    const ruilOpen = d.ruilverzoeken.filter(r => r.status === 'overgenomen').length + feestTeKeuren().length;
     const zGemeld = d.ziekmeldingen.filter(z => z.status === 'gemeld');
-    if (zGemeld.length) teControleren.unshift(`<a class="knop gevaar" style="background:#fff" href="#aanvragen/ziek">🤒 ${zGemeld.length} ziekmelding${zGemeld.length > 1 ? 'en' : ''}</a>`);
+    const rv = A.rooster(volgende);
+    const pl = Uitvraag.maandPlanning(d, volgende);
+    const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
+    const roosterRegel = !rv ? (pl.aan && pl.voorlopig >= nu ? `wordt vanzelf gemaakt vanaf ${A.datumLang(pl.voorlopig)}` : `wordt vanzelf gemaakt op ${A.datumLang(genDatum)}`)
+      : rv.status === 'voorlopig' ? `personeel geeft door wat ze kunnen · klaar op ${A.datumLang(pl.definitief)}`
+      : rv.status === 'concept' ? 'klaar – kijk het na en verstuur het' : 'verstuurd naar het personeel';
+
+    // ---- Nog in te vullen: komende 14 dagen ----
+    const tot = G.addDays(nu, 14);
+    const open = groepOpen(d.diensten.filter(x => !x.medewerker_id && x.datum >= nu && x.datum <= tot)
+      .sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start)));
+    const vlo = groepOpen(vlOpen(nu).filter(x => x.datum <= tot));
+    const wanneer = dag => { const n = Math.round((G.parse(dag) - G.parse(nu)) / 864e5);
+      return n === 0 ? '<span class="label fout">vandaag</span>' : n === 1 ? '<span class="label fout">morgen</span>' : n <= 3 ? `<span class="label fout">over ${n} dagen</span>` : n <= 7 ? `<span class="label let">over ${n} dagen</span>` : `<span class="label">over ${n} dagen</span>`; };
+    const wieKan = x => { const ctx = G.context(d, d.diensten.filter(y => y.id !== x.id));
+      return G.kandidaten(ctx, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.actief !== false).map(k => k.m); };
+    const openRij = ({ x, n, ids }) => {
+      const e = x.event_id && A.event(x.event_id), kan = wieKan(x);
+      const zichtbaarVoorPersoneel = A.dienstZichtbaar(x) || (e && e.status === 'concept');
+      return `<div class="item klik" data-open="${x.id}" style="cursor:pointer"><div class="datumblok ${x.locatie}"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${n > 1 ? n + '× ' : ''}${esc(x.functie)} · ${tijd(x)}</div>
+          <div class="meta">${e ? '🎉 ' + esc(e.naam) : A.LOC[x.locatie]} · ${zichtbaarVoorPersoneel ? 'staat open in de app, personeel kan hem oppakken' : 'rooster nog niet verstuurd'}</div>
+          <div class="meta">${kan.length ? `👥 Kan: ${kan.slice(0, 4).map(m => esc(m.naam)).join(', ')}${kan.length > 4 ? ' en nog ' + (kan.length - 4) : ''}` : '<b style="color:var(--fout)">Niemand van het personeel kan</b>'}</div></div>
+        <div class="rechts">${wanneer(x.datum)} <button class="knop klein primair" type="button">Invullen</button></div></div>`; };
+    const vlRij = ({ x, n }) => { const e = A.event(x.event_id), st = uitvraagStand(e);
+      return `<div class="item klik" data-uvev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${n > 1 ? n + '× ' : ''}${esc(x.functie)} · ${tijd(x)}</div>
+          <div class="meta">🎉 ${esc(e.naam)} · oproepkrachten gevraagd tot ${esc(A.datumKort(e.uitvraag_tot))}</div>
+          <div class="meta">📨 ${st.groep.length} gevraagd · ${st.reac.length} gereageerd · <b style="color:var(--ok)">${st.kan} kan</b> · ${st.kanNiet} niet · ${st.geen} nog niets</div></div>
+        <div class="rechts">${wanneer(x.datum)} <button class="knop klein" type="button">Bekijken</button></div></div>`; };
+    const urgent = open.filter(g => g.x.datum <= G.addDays(nu, 3)).reduce((t, g) => t + g.n, 0);
+
+    // ---- Te doen ----
+    const taken = [];
+    if (zGemeld.length) taken.push(['aanvragen/ziek', '🤒', `${zGemeld.length} ziekmelding${zGemeld.length > 1 ? 'en' : ''} bevestigen en vervanging regelen`, zGemeld.map(z => A.mwNaam(z.medewerker_id)).join(', '), 'fout']);
+    if (urgent) taken.push(['#nogOpen', '🔴', `${urgent} open plek${urgent > 1 ? 'ken' : ''} in de komende 3 dagen`, 'zie de lijst hieronder', 'fout']);
+    if (verlofOpen.length) taken.push(['aanvragen/verlof', '🌴', `${verlofOpen.length} vrij-aanvra${verlofOpen.length > 1 ? 'gen' : 'ag'} beslissen`, verlofOpen.map(v => A.mwNaam(v.medewerker_id)).join(', '), 'let']);
+    if (ruilOpen) taken.push(['aanvragen/ruil', '🔁', `${ruilOpen} ruil${ruilOpen > 1 ? 'en' : ''} goedkeuren`, 'beide collega\'s zijn al akkoord', 'let']);
+    for (const r of d.roosters.filter(r => r.status === 'concept')) taken.push(['rooster', '📅', `Rooster ${A.maandNaam(r.maand)} nakijken en versturen`, 'het personeel ziet het pas als jij op Versturen drukt', 'ok', r.maand]);
     const evConcept = d.zalen_events.filter(e => e.status === 'concept');
-    if (evConcept.length) teControleren.push(`<a class="knop ok" href="#zalen">🎉 ${evConcept.length} feest${evConcept.length > 1 ? 'en' : ''}</a>`);
+    if (evConcept.length) taken.push(['zalen', '🎉', `${evConcept.length} feest${evConcept.length > 1 ? 'en' : ''} nakijken en versturen`, evConcept.map(e => e.naam).join(', '), 'ok']);
+    const opletten = actieveMw().map(m => ({ m, st: personeelStats(m) })).filter(x => x.st.let.length);
+
     hoofd.innerHTML = `
       <div id="oPush"></div>
-      ${teControleren.length ? `<div class="statusbalk concept" style="margin-bottom:1.2em">🔔 <div><b>Klaar om te controleren en te versturen:</b> het personeel ziet dit pas na versturen.</div><div class="acties">${teControleren.join('')}</div></div>` : ''}
-      <div class="kop"><div><h1>Goedendag 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
-        <div class="acties"><button class="knop" id="oBericht" type="button">🔔 Bericht aan personeel</button><a class="knop" href="#zalen">+ Feest toevoegen</a><a class="knop primair" href="#rooster">Rooster bekijken</a></div></div>
-      <div class="tegels">
-        <div class="tegel klik ${verlofOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/verlof"><div class="getal">${verlofOpen.length}</div><div class="wat">vrij-aanvragen</div></div>
-        <div class="tegel klik ${ruilOpen.length ? 'aandacht' : ''}" data-ga="aanvragen/ruil"><div class="getal">${ruilOpen.length}</div><div class="wat">ruilingen goed te keuren</div></div>
-        ${(() => { const caf = openDiensten.filter(x => x.locatie === 'cafetaria').length, zaal = openDiensten.filter(x => x.locatie !== 'cafetaria').length + vlOpenNu.length;
-          return `<div class="tegel klik ${zaal ? 'aandacht' : ''}" data-ga="rooster" data-loc="zalen"><div class="getal">${zaal}</div><div class="wat">open diensten zalencentrum${vlOpenNu.length ? `<br><small>waarvan ${vlOpenNu.length} bij feesten met lopende uitvraag</small>` : ''}</div></div>
-        <div class="tegel klik ${caf ? 'aandacht' : ''}" data-ga="rooster" data-loc="cafetaria"><div class="getal">${caf}</div><div class="wat">open diensten cafetaria</div></div>`; })()}
-        <div class="tegel klik" data-ga="rooster" data-maand="${volgende}"><div class="getal" style="font-size:1.4rem">${roosterTekst}</div><div class="wat">rooster ${esc(A.maandNaam(volgende))}<br><small>${roosterSub}</small></div></div>
+      <div class="kop"><div><h1>Goedendag${d.instellingen.beheer_naam ? ' ' + esc(d.instellingen.beheer_naam) : ''} 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
+        <div class="acties"><button class="knop" id="oZiek" type="button">🤒 Iemand belde: ziek</button><button class="knop" id="oBericht" type="button">🔔 Bericht aan personeel</button><a class="knop" href="#zalen">+ Feest</a></div></div>
+      <div class="paneel taken"><div class="paneel-kop"><h3>✅ Te doen</h3></div>
+        ${taken.length ? taken.map(([ga, ic, wat, sub, kl, maand]) => `<a class="taak ${kl}" href="${ga.startsWith('#') ? ga : '#' + ga}" ${maand ? `data-maand="${maand}"` : ''}><span class="taak-ic">${ic}</span><span class="taak-tekst"><b>${esc(wat)}</b><small>${esc(sub)}</small></span><span class="taak-pijl">›</span></a>`).join('')
+          : '<div class="leeg"><span class="groot">🎉</span>Niets te doen. Alles is geregeld!</div>'}
       </div>
-      <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
+      <div class="paneel" id="nogOpen"><div class="paneel-kop"><h3>Nog in te vullen · komende 14 dagen</h3><a class="knop klein" href="#rooster">Naar het rooster</a></div>
+        ${open.length || vlo.length ? open.map(openRij).join('') + vlo.map(vlRij).join('') : '<div class="leeg"><span class="groot">👌</span>Alle diensten van de komende 14 dagen zijn ingevuld</div>'}
+      </div>
+      <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start">
         <div class="paneel"><div class="paneel-kop"><h3>Vandaag aan het werk</h3></div>
-          ${vandaag.length ? vandaag.map(x => { const m = A.mw(x.medewerker_id); return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')}</div><div class="meta">${tijd(x)} · ${esc(x.functie)}</div></div><div class="rechts">${locLabel(x.locatie)}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">☕</span>Vandaag niemand ingepland</div>'}
+          ${(() => { const vandaag = d.diensten.filter(x => x.datum === nu && x.medewerker_id).sort((a, b) => G.min(a.start) - G.min(b.start));
+            return vandaag.length ? vandaag.map(x => { const m = A.mw(x.medewerker_id); return `<div class="item">${avatar(m)}<div><div class="wie">${esc(m ? m.naam : '?')}</div><div class="meta">${tijd(x)} · ${esc(x.functie)}</div></div><div class="rechts">${locLabel(x.locatie)}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">☕</span>Vandaag niemand ingepland</div>'; })()}
         </div>
+        <div class="paneel"><div class="paneel-kop"><h3>Rooster ${esc(A.maandNaam(volgende))}</h3><a class="knop klein" href="#rooster" data-maand="${volgende}">Bekijken</a></div>
+          <p style="margin:.2em 0 .6em">${esc(roosterRegel)}.</p>
+        </div>
+        ${opletten.length ? `<div class="paneel"><div class="paneel-kop"><h3>⚠️ Om op te letten</h3><a class="knop klein" href="#personeel">Personeel</a></div>${opletten.slice(0, 6).map(({ m, st }) => `<a class="item klik" href="#personeel/${m.id}" style="text-decoration:none;color:inherit">${avatar(m)}<div><div class="wie">${esc(m.naam)}</div><div class="meta">${esc(st.let.join(' · '))}</div></div><div class="rechts taak-pijl">›</div></a>`).join('')}</div>` : ''}
         <div class="paneel"><div class="paneel-kop"><h3>Komende feesten</h3><a class="knop klein" href="#zalen">Agenda</a></div>
-          ${feesten.length ? feesten.map(e => { const ds = d.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; return `<div class="item"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div><div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten ${e.zaal ? '· ' + esc(e.zaal) : ''}</div></div><div class="rechts">${e.status === 'open' ? uitvraagLabel(e) + vlLabel(e) : e.status === 'concept' ? '<span class="label let">te controleren</span>' : !ds.length ? '<span class="label">nog niet ingeroosterd</span>' : open ? `<span class="label fout">${open} open</span>` : `<span class="label ok">${ds.length} mensen</span>`}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen feesten in de komende 3 weken</div>'}
+          ${(() => { const feesten = d.zalen_events.filter(e => e.datum >= nu && e.datum <= G.addDays(nu, 21)).sort((a, b) => a.datum.localeCompare(b.datum));
+            return feesten.length ? feesten.map(e => { const ds = d.diensten.filter(x => x.event_id === e.id); const o = ds.filter(x => !x.medewerker_id).length; return `<div class="item klik" data-ev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.MAANDEN[G.parse(e.datum).getUTCMonth()].slice(0, 3)}</small></div><div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten</div></div><div class="rechts">${e.status === 'open' ? '<span class="label let">oproep loopt</span>' + vlLabel(e) : e.status === 'concept' ? '<span class="label let">nakijken</span>' : !ds.length ? '<span class="label">nog niet ingedeeld</span>' : o ? `<span class="label fout">${o} open</span>` : `<span class="label ok">compleet</span>`}</div></div>`; }).join('') : '<div class="leeg"><span class="groot">🎉</span>Geen feesten in de komende 3 weken</div>'; })()}
         </div>
-        <div class="paneel melding-lijst"><div class="paneel-kop"><h3>Meldingen</h3>${meldingen.some(m => !m.gelezen) ? '<button class="knop klein" id="allesGelezen">Alles gelezen</button>' : ''}</div>
-          ${meldingen.length ? meldingen.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'}
-        </div>
-      </div>`;
-    hoofd.querySelectorAll('.statusbalk [data-maand]').forEach(a => a.onclick = () => { staat.maand = a.dataset.maand; });
-    hoofd.querySelectorAll('[data-ga]').forEach(t => t.onclick = () => {
-      const [p, sub] = t.dataset.ga.split('/');
-      if (sub) staat.aanvraagTab = sub;
-      if (t.dataset.maand) staat.maand = t.dataset.maand;
-      if (t.dataset.loc) staat.loc = t.dataset.loc;
-      location.hash = p;
-    });
+      </div>
+      <details class="paneel melding-lijst"><summary><b>Laatste meldingen</b> ${d.meldingen.some(m => !m.medewerker_id && !m.gelezen) ? `<span class="label let">${d.meldingen.filter(m => !m.medewerker_id && !m.gelezen).length} nieuw</span>` : ''}</summary>
+        ${d.meldingen.some(m => !m.medewerker_id && !m.gelezen) ? '<p><button class="knop klein" id="allesGelezen" type="button">Alles gelezen</button></p>' : ''}
+        ${(() => { const ms = d.meldingen.filter(m => !m.medewerker_id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 10);
+          return ms.length ? ms.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'; })()}
+      </details>`;
+    hoofd.querySelectorAll('[data-maand]').forEach(a => a.addEventListener('click', () => { staat.maand = a.dataset.maand; }));
+    hoofd.querySelectorAll('a.taak[href^="#aanvragen/"]').forEach(a => a.addEventListener('click', () => { staat.aanvraagTab = a.getAttribute('href').split('/')[1]; }));
+    const no = hoofd.querySelector('a.taak[href="#nogOpen"]');
+    if (no) no.onclick = e => { e.preventDefault(); $('#nogOpen').scrollIntoView({ behavior: 'smooth' }); };
+    hoofd.querySelectorAll('[data-open]').forEach(x => x.onclick = () => { const dn = A.data.diensten.find(y => y.id === x.dataset.open); staat.maand = dn.maand; dienstModal(dn); });
+    hoofd.querySelectorAll('[data-uvev], [data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.uvev || x.dataset.ev)));
     const ag = $('#allesGelezen');
     if (ag) ag.onclick = () => A.bezig(ag, async () => {
       for (const m of d.meldingen.filter(m => !m.medewerker_id && !m.gelezen)) await Store.update('meldingen', m.id, { gelezen: true });
@@ -172,6 +224,7 @@
     });
     if (!Push.later('beheer')) Push.paneel($('#oPush'), { rol: 'beheer', compact: true, onTest: testBeheer });
     $('#oBericht').onclick = () => berichtAanPersoneel();
+    $('#oZiek').onclick = () => ziekNamens();
   }
 
   // =====================================================================
@@ -188,15 +241,15 @@
     const diensten = d.diensten.filter(x => x.maand === maand && (staat.loc === 'alle' || x.locatie === staat.loc));
     const open = diensten.filter(x => !x.medewerker_id).length;
     const vlo = staat.loc === 'cafetaria' ? 0 : vlOpen('', maand).length;
-    const vlZin = vlo ? ` <b class="fout-tekst">Feesten met lopende uitvraag: voorlopig ${vlo} open.</b>` : '';
+    const vlZin = vlo ? ` <b class="fout-tekst">Feesten waarvoor de oproep nog loopt: nog ${vlo} plek${vlo === 1 ? '' : 'ken'} open.</b>` : '';
 
     let status;
     const pl = Uitvraag.maandPlanning(d, maand);
     if (!r) {
       const gd = pl.definitief;
       const tweeRondes = pl.aan && gd > nu;
-      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${tweeRondes ? `Planning: <b>${esc(A.datumKort(pl.ronde1 < nu ? nu : pl.ronde1))}</b> voorlopig rooster vaste krachten (zij kunnen extra diensten kiezen) · <b>${esc(A.datumKort(pl.ronde2))}</b> extra diensten toekennen, rest naar oproepkrachten${pl.ronde3 ? ` · <b>${esc(A.datumKort(pl.ronde3))}</b> oproepkrachten inplannen + herinnering` : ''} · <b>${esc(A.datumKort(gd))}</b> definitief.` : gd >= nu ? 'Wordt automatisch gemaakt op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
-        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Voorlopig rooster nu maken</button><button class="knop klein" id="maakRooster">Meteen definitief maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}</div></div>`;
+      status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${tweeRondes ? `Je hoeft niets te doen. Op <b>${esc(A.datumLang(pl.ronde1 < nu ? nu : pl.ronde1))}</b> begint de app vanzelf: eerst worden de vaste krachten ingepland, daarna mogen oproepkrachten aangeven wat ze kunnen. Op <b>${esc(A.datumLang(gd))}</b> is het rooster klaar om na te kijken.` : gd >= nu ? 'De app maakt het vanzelf op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
+        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Nu al beginnen</button><button class="knop klein" id="maakRooster">Meteen het hele rooster maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}</div></div>`;
     } else if (r.status === 'voorlopig') {
       const cafOpen = Uitvraag.cafOpen(d, maand), ids = new Set(cafOpen.map(x => x.id));
       const groep = G.cafOproepGroep(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
@@ -204,17 +257,23 @@
       const ronde = +r.ronde || 1;
       const vastGroep = Uitvraag.cafVast(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
       const vastKiest = vastGroep.filter(m => d.event_reacties.some(x => x.dienst_id && ids.has(x.dienst_id) && x.medewerker_id === m.id && x.kan)).length;
-      const stap = ronde < 2 ? `<b>Stap 1 van 3:</b> de vaste krachten zien hun diensten (grijs) en kunnen extra diensten kiezen (${vastKiest} hebben al iets gekozen). Op ${esc(A.datumLang(pl.ronde2))} worden die toegekend en gaan de open diensten ook naar de oproepkrachten.`
-        : ronde < 3 ? `<b>Stap 2 van 3:</b> de open diensten staan uit bij de oproepkrachten (${reageerden} van ${groep.length} hebben gereageerd).${pl.ronde3 ? ` Op ${esc(A.datumLang(pl.ronde3))} worden ze ingepland en krijgt iedereen een herinnering voor wat dan nog open is.` : ''}`
-        : `<b>Stap 3 van 3:</b> oproepkrachten zijn ingepland, iedereen heeft een herinnering gekregen voor de laatste open diensten. Wat nu nog binnenkomt wordt bij het definitief maken gelijk verdeeld (vast en oproep).`;
-      status = `<div class="statusbalk concept">⏳ <div><b>Voorlopig</b> – ${stap} <b>${cafOpen.length} open cafetariadienst${cafOpen.length === 1 ? '' : 'en'}.</b> Op ${esc(A.datumLang(pl.definitief))} wordt het rooster definitief gemaakt en verstuurd.${vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button></div></div>`;
+      // Tijdlijn in gewone taal: wat is al gebeurd, wat komt nog. Ricardo hoeft niets te doen.
+      const stappen = [
+        ['Vaste krachten ingepland', r.ronde1_op ? r.ronde1_op.slice(0, 10) : (pl.ronde1 < nu ? pl.ronde1 : nu), true, vastGroep.length ? `${vastKiest} van ${vastGroep.length} kozen al extra diensten` : ''],
+        ['Oproepkrachten gevraagd', pl.ronde2, ronde >= 2, ronde >= 2 ? `${reageerden} van ${groep.length} hebben gereageerd` : 'eerst mogen de vaste krachten extra diensten kiezen'],
+        ...(pl.ronde3 ? [['Herinnering voor wat nog open is', pl.ronde3, ronde >= 3, '']] : []),
+        ['Rooster af en klaar om na te kijken', pl.definitief, false, d.instellingen.auto_publiceren ? 'wordt dan meteen verstuurd' : 'jij kijkt het na en drukt op Versturen']
+      ];
+      const nu1 = stappen.findIndex(x => !x[2]);
+      status = `<div class="statusbalk concept">⏳ <div><b>Het personeel geeft door wat ze kunnen.</b> Je hoeft niets te doen: de app maakt het rooster vanzelf af op <b>${esc(A.datumLang(pl.definitief))}</b>. Nu nog <b>${cafOpen.length} open cafetariadienst${cafOpen.length === 1 ? '' : 'en'}</b>.${vlZin}
+          <ol class="tijdlijn">${stappen.map(([wat, dt, klaar, sub], i) => `<li class="${klaar ? 'klaar' : i === nu1 ? 'nu' : ''}"><b>${klaar ? '✓' : i === nu1 ? '●' : '○'} ${esc(wat)}</b> <small>${esc(A.datumKort(dt))}${sub ? ' · ' + esc(sub) : ''}</small></li>`).join('')}</ol></div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button></div></div>`;
     } else if (r.status === 'concept') {
-      status = `<div class="statusbalk concept">📝 <div><b>Concept</b> – controleer het rooster; het personeel ziet het pas na versturen. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} aandachtspunten</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
+      status = `<div class="statusbalk concept">📝 <div><b>Klaar om na te kijken</b> – het personeel ziet dit rooster pas als jij op Versturen drukt. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
     } else {
       status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terug naar concept</button></div></div>`;
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
     }
 
     hoofd.innerHTML = `
@@ -242,17 +301,17 @@
       await herlaad(); A.toast(`Voorlopig rooster gemaakt – ${res.open} open cafetariadienst(en)`, 'ok'); pRooster();
     });
     if (k('maakDefinitief')) k('maakDefinitief').onclick = e => A.bezig(e.currentTarget, async () => {
-      if (!await A.bevestig('Nu definitief maken', `De uitvraag stopt en de open cafetariadiensten worden verdeeld onder iedereen die "Ik kan" zei (vaste krachten en oproepkrachten gelijk).${d.instellingen.auto_publiceren ? ' Het rooster wordt daarna meteen verstuurd.' : ' Daarna kun je het controleren en versturen.'}`, 'Definitief maken')) return;
+      if (!await A.bevestig('Nu definitief maken', `Er wordt niet meer gewacht op antwoorden en de open cafetariadiensten worden verdeeld onder iedereen die "Ik kan" zei (vaste krachten en oproepkrachten gelijk).${d.instellingen.auto_publiceren ? ' Het rooster wordt daarna meteen verstuurd.' : ' Daarna kun je het controleren en versturen.'}`, 'Definitief maken')) return;
       await herlaad();
       const res = await Uitvraag.cafDefinitief(Store, A.data, maand);
       await herlaad(); A.toast(`${res.gevuld} dienst(en) verdeeld${res.open ? ', ' + res.open + ' nog open' : ''}`, 'ok'); pRooster();
     });
-    if (k('opnieuwRooster')) k('opnieuwRooster').onclick = async e => { if (await A.bevestig('Opnieuw maken', 'Alle diensten van ' + A.maandNaam(maand) + ' worden opnieuw verdeeld. Handmatige wijzigingen gaan verloren. Feesten die via de uitvraag zijn ingepland blijven staan.', 'Opnieuw maken')) A.bezig(e.target, () => maakRooster(maand, true)); };
-    if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Concept weggooien', 'Het concept-rooster voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
+    if (k('opnieuwRooster')) k('opnieuwRooster').onclick = async e => { if (await A.bevestig('Opnieuw maken', 'Alle diensten van ' + A.maandNaam(maand) + ' worden opnieuw verdeeld. Handmatige wijzigingen gaan verloren. Feesten die al zijn ingedeeld blijven staan.', 'Opnieuw maken')) A.bezig(e.target, () => maakRooster(maand, true)); };
+    if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Rooster weggooien', 'Het rooster (nog niet verstuurd) voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
     if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand));
-    if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terug naar concept', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terug naar concept')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
+    if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terugtrekken', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terugtrekken')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
     if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
-    if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Aandachtspunten', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
+    if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Opmerkingen van de planner', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
 
     const inh = $('#roosterInhoud');
     if (staat.weergave === 'personen') return renderPersonen(inh, maand);
@@ -310,30 +369,36 @@
     const dicht = new Map(d.sluitingsdagen.map(s => [s.datum, s.reden]));
     const eerste = maand + '-01', laatste = G.lastDay(maand);
     let w = G.weekStart(eerste);
-    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span><i class="voorlopig-i"></i>Voorlopig (uitvraag loopt nog)</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
+    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span><i class="voorlopig-i"></i>Voorlopig (oproep loopt nog)</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
     const vlPerDag = {};
     if (staat.loc !== 'cafetaria') for (const x of voorlopig().diensten) (vlPerDag[x.datum] = vlPerDag[x.datum] || []).push(x);
     const heeftRooster = !!A.rooster(maand);
+    const ruilIds = new Set(d.ruilverzoeken.filter(r => ['open', 'gevraagd', 'overgenomen'].includes(r.status)).flatMap(r => [r.dienst_id, r.terug_dienst_id]));
+    const dienstHtml = ({ x, n, ids }) => { const m = A.mw(x.medewerker_id); const kb = !m && r && r.status === 'voorlopig' && x.locatie === 'cafetaria' ? kanBij(ids) : null; return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}${kb !== null ? ' – ' + kb + ' oproepkracht(en) kunnen' : ''}">
+            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}${kb !== null ? ` <span class="kanaantal ${kb ? '' : 'nul'}">✓${kb}</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; };
+    // Weekdagen waarop deze maand helemaal niets is (bv. cafetaria dicht op maandag) smal tonen
+    const dagenMnd = G.monthDays(maand);
+    const leeg = [0, 1, 2, 3, 4, 5, 6].map(wd => !dagenMnd.some(dag => G.weekday(dag) === wd && (diensten.some(x => x.datum === dag) || (staat.loc !== 'cafetaria' && d.zalen_events.some(e => e.datum === dag)))));
+    const kolommen = leeg.map(l => l ? 'minmax(46px, .32fr)' : 'minmax(var(--dagmin, 0px), 1fr)').join(' ');
     while (w <= laatste) {
-      html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen">`;
+      html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen" style="grid-template-columns:${kolommen}">`;
       for (let i = 0; i < 7; i++) {
         const dag = G.addDays(w, i);
         if (G.monthOf(dag) !== maand) { html += '<div class="dag buiten"></div>'; continue; }
         const ds = diensten.filter(x => x.datum === dag).sort((a, b) => (a.locatie === b.locatie ? 0 : a.locatie === 'cafetaria' ? -1 : 1) || G.min(a.start) - G.min(b.start));
         const evs = d.zalen_events.filter(e => e.datum === dag && staat.loc !== 'cafetaria');
         const isDicht = dicht.has(dag);
-        const ruilIds = new Set(d.ruilverzoeken.filter(r => ['open', 'gevraagd', 'overgenomen'].includes(r.status)).flatMap(r => [r.dienst_id, r.terug_dienst_id]));
-        html += `<div class="dag ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
+        html += `<div class="dag ${leeg[i] ? 'smal' : ''} ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
           <div class="dag-kop"><span>${A.DAG_KORT[i]}</span><span class="nr">${G.parse(dag).getUTCDate()}</span></div>
           ${isDicht && staat.loc !== 'zalen' ? `<span class="label">Cafetaria dicht${dicht.get(dag) ? ' · ' + esc(dicht.get(dag)) : ''}</span>` : ''}
+          ${groepOpen(ds.filter(x => !x.event_id || !evs.some(e => e.id === x.event_id))).map(dienstHtml).join('')}
           ${evs.map(e => { const vl = (vlPerDag[dag] || []).filter(x => x.event_id === e.id), vo = vl.filter(x => !x.medewerker_id).length;
             const vlRijen = groepOpen(vl.sort((a, b) => !a.medewerker_id - !b.medewerker_id || G.min(a.start) - G.min(b.start)));
-            return `<div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>${vl.length ? `<div class="vl-kop ${vo ? 'fout' : 'ok'}" data-ev="${e.id}">⏳ voorlopig · ${vo ? vo + ' open' : 'rond'}</div>` : ''}` +
-              vlRijen.map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – uitvraag loopt nog">
-                ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join(''); }).join('')}
-          ${groepOpen(ds).map(({ x, n, ids }) => { const m = A.mw(x.medewerker_id); const kb = !m && r && r.status === 'voorlopig' && x.locatie === 'cafetaria' ? kanBij(ids) : null; return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}${kb !== null ? ' – ' + kb + ' oproepkracht(en) kunnen' : ''}">
-            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}${kb !== null ? ` <span class="kanaantal ${kb ? '' : 'nul'}">✓${kb}</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')}
-          ${heeftRooster ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}
+            return `<div class="feest-blok"><div class="event-kop" data-ev="${e.id}" title="${esc(e.naam)}">🎉 ${esc(e.naam)}</div>${vl.length ? `<div class="vl-kop ${vo ? 'fout' : 'ok'}" data-ev="${e.id}">⏳ oproep loopt · ${vo ? vo + ' open' : 'rond'}</div>` : ''}` +
+              vlRijen.map(({ x, n }) => { const m = A.mw(x.medewerker_id); return `<div class="dienst zalen voorlopig ${m ? '' : 'open'}" data-ev="${e.id}" title="Voorlopig – de oproep loopt nog">
+                ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; }).join('')
+              + groepOpen(ds.filter(x => x.event_id === e.id)).map(dienstHtml).join('') + '</div>'; }).join('')}
+          ${heeftRooster && !leeg[i] ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}${leeg[i] ? '<span class="zacht smal-tekst">dicht</span>' : ''}
         </div>`;
       }
       html += '</div></div>';
@@ -388,7 +453,7 @@
       ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
           <div class="indeling-namen">${rij.map(x => x.medewerker_id ? naam(x) : '<span class="indeling-naam open">Open</span>').join('')}</div></div>`; }).join('')}
-      <p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Met de reacties van nu; vast personeel telt mee. 🔒 = bevestigd · ⭐ = ${esc(beheerNaam())} · 🧑‍🍳 = inhuur. Wie nog niet reageerde, staat hier niet bij. Pas na "Nu inplannen" (of na de termijn) kun je schuiven.</p>
+      <p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Met de reacties van nu; vast personeel telt mee. 🔒 = bevestigd · ⭐ = ${esc(beheerNaam())} · 🧑‍🍳 = inhuur. Wie nog niet reageerde, staat hier niet bij. Pas na "Nu indelen" (of na de termijn) kun je schuiven.</p>
     </div>`;
   }
 
@@ -679,7 +744,7 @@
         await A.melding(res.medewerker_id, `Je dienst op ${A.datumLang(res.datum)} is gewijzigd naar ${res.start}–${res.eind}.`);
       }
     }
-    await herlaad(); pRooster();
+    await herlaad(); opnieuw();
     A.toast('Opgeslagen', 'ok');
   }
 
@@ -721,7 +786,7 @@
         <div class="rechts">${r.status === 'overgenomen' ? `<button class="knop klein gevaar" data-raf="${r.id}">Afwijzen</button><button class="knop klein ok" data-rgoed="${r.id}">Goedkeuren</button>` : r.status === 'open' ? `<button class="knop klein" data-rtoewijs="${r.id}">Zelf iemand kiezen</button>` : r.status === 'gevraagd' ? '<span class="label let">wacht op collega</span>' : `<span class="label ${r.status === 'goedgekeurd' ? 'ok' : 'fout'}">${{ goedgekeurd: 'geruild', afgewezen: 'afgewezen', geweigerd: 'collega zei nee' }[r.status] || r.status}</span>`}</div></div>`; };
 
     hoofd.innerHTML = `<div class="kop"><h1>Aanvragen</h1><div class="tabs" id="aTabs">
-        <button data-v="verlof">Vrij vragen ${vOpen.length ? `(${vOpen.length})` : ''}</button><button data-v="ruil">Ruilen ${rTeKeuren.length + fTeKeuren.length ? `(${rTeKeuren.length + fTeKeuren.length})` : ''}</button><button data-v="beschikbaar">Kan niet</button><button data-v="ziek">Ziek ${d.ziekmeldingen.filter(z => z.status === 'gemeld').length ? `(${d.ziekmeldingen.filter(z => z.status === 'gemeld').length})` : ''}</button></div></div>
+        <button data-v="verlof">Vrij vragen ${vOpen.length ? `(${vOpen.length})` : ''}</button><button data-v="ruil">Ruilen ${rTeKeuren.length + fTeKeuren.length ? `(${rTeKeuren.length + fTeKeuren.length})` : ''}</button>${nb.length ? '<button data-v="beschikbaar">Kan niet</button>' : ''}<button data-v="ziek">Ziek ${d.ziekmeldingen.filter(z => z.status === 'gemeld').length ? `(${d.ziekmeldingen.filter(z => z.status === 'gemeld').length})` : ''}</button></div></div>
       <div id="aInh"></div>`;
     hoofd.querySelectorAll('#aTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === sub); b.onclick = () => { location.hash = 'aanvragen/' + b.dataset.v; }; });
     const inh = $('#aInh');
@@ -733,10 +798,11 @@
           <div class="meta">Gemeld ${A.tijdGeleden(z.gemeld_op)}${z.minuten_voor_dienst != null ? ' · ' + meldtijdTekst(z.minuten_voor_dienst) + ' voor de dienst' : ''}${z.opmerking ? ' · “' + esc(z.opmerking) + '”' : ''}</div>
           ${ds.length ? `<div class="meta">Vervalt: ${ds.map(x => esc(A.datumKort(x.datum)) + ' ' + tijd(x) + (x.medewerker_id && x.medewerker_id !== z.medewerker_id ? ' → ' + esc(A.mwNaam(x.medewerker_id)) : x.medewerker_id ? '' : ' <b style="color:var(--fout)">(open)</b>')).join(' · ')}</div>` : ''}</div>
           <div class="rechts">${knoppen}</div></div>`; };
-      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Te bevestigen</h3></div><p class="zacht" style="margin-top:-.4em">Bevestig een ziekmelding als de medewerker je heeft gebeld. Je regelt dan meteen vervanging.</p>
+      inh.innerHTML = `<div class="paneel"><div class="paneel-kop"><h3>Te bevestigen</h3><button class="knop klein primair" id="ziekNamens" type="button">🤒 Iemand belde: ziek melden</button></div><p class="zacht" style="margin-top:-.4em">Bevestig een ziekmelding als de medewerker je heeft gebeld. Je regelt dan meteen vervanging.</p>
           ${gemeld.length ? gemeld.map(z => item(z, `<button class="knop klein" data-zaf="${z.id}">Afwijzen</button><button class="knop klein ok" data-zok="${z.id}">Bevestigen</button>`)).join('') : '<div class="leeg">Geen nieuwe ziekmeldingen</div>'}</div>
         <div class="paneel"><div class="paneel-kop"><h3>Nu ziek</h3><a class="knop klein" href="#verzuim">Verzuimoverzicht</a></div>
           ${nuZiek.length ? nuZiek.map(z => item(z, `<button class="knop klein" data-zbeter="${z.id}">Beter melden</button>`)).join('') : '<div class="leeg"><span class="groot">💪</span>Niemand is ziek</div>'}</div>`;
+      $('#ziekNamens').onclick = () => ziekNamens();
       inh.querySelectorAll('[data-zok]').forEach(b => b.onclick = () => ziekBevestigen(b.dataset.zok));
       inh.querySelectorAll('[data-zaf]').forEach(b => b.onclick = () => ziekAfwijzen(b.dataset.zaf));
       inh.querySelectorAll('[data-zbeter]').forEach(b => b.onclick = () => ziekBeter(b.dataset.zbeter));
@@ -785,7 +851,7 @@
   // ---------------- ziekmeldingen ----------------
   const meldtijdTekst = min => min == null ? '–' : min < 0 ? 'tijdens de dienst' : min < 60 ? min + ' min' : min < 1440 ? (Math.round(min / 6) / 10).toString().replace('.', ',') + ' uur' : Math.round(min / 1440) + ' dag(en)';
 
-  async function ziekBevestigen(id) {
+  async function ziekBevestigen(id, namens) {
     const z = A.data.ziekmeldingen.find(x => x.id === id), m = A.mw(z.medewerker_id);
     // diensten die vervallen: gekozen diensten + alle diensten vanaf 'van' t/m de komende 3 dagen
     const ids = new Set(z.dienst_ids || []);
@@ -801,9 +867,9 @@
     };
     const res = await A.modal('Ziekmelding bevestigen', `<p><b>${esc(m.naam)}</b> is ziek vanaf ${esc(A.datumLang(z.van))}. Gemeld ${A.tijdGeleden(z.gemeld_op)}${z.minuten_voor_dienst != null ? ', ' + meldtijdTekst(z.minuten_voor_dienst) + ' voor de dienst' : ''}.</p>
       ${ds.length ? `<p>Wie neemt deze diensten over?</p><table class="lijst"><tbody>${ds.map(rij).join('')}</tbody></table>` : '<p class="zacht">Er vallen geen diensten uit.</p>'}
-      <div class="veld" style="margin-top:1em"><label>Notitie (alleen voor jou)</label><input id="zNot" placeholder="bv. belde om 7:15"></div>`,
-      [{ label: 'Annuleren', waarde: null }, { label: 'Bevestigen', soort: 'ok', waarde: bg => ({ not: bg.querySelector('#zNot').value, verv: [...bg.querySelectorAll('.zVerv')].map(s => ({ d: s.dataset.d, m: s.value || null })) }) }]);
-    if (!res) return;
+      <div class="veld" style="margin-top:1em"><label>Notitie (alleen voor jou)</label><input id="zNot" value="${esc(z.notitie_beheer || '')}" placeholder="bv. belde om 7:15"></div>`,
+      [{ label: namens ? 'Later regelen' : 'Annuleren', waarde: null }, { label: 'Bevestigen', soort: 'ok', waarde: bg => ({ not: bg.querySelector('#zNot').value, verv: [...bg.querySelectorAll('.zVerv')].map(s => ({ d: s.dataset.d, m: s.value || null })) }) }]);
+    if (!res) { if (namens) { await herlaad(); opnieuw(); A.toast('Ziekmelding staat bij "Te bevestigen". Regel de vervanging daar.', 'ok'); } return; }
     await Store.update('ziekmeldingen', id, { status: 'bevestigd', notitie_beheer: res.not, dienst_ids: [...new Set([...(z.dienst_ids || []), ...ds.map(x => x.id)])] });
     let open = 0;
     for (const v of res.verv) {
@@ -818,9 +884,42 @@
           await A.melding(k.m.id, `🆘 Er is een open dienst door ziekte: ${om}. Kun jij? Pak hem op bij Beschikbaar.`);
       }
     }
-    await A.melding(z.medewerker_id, `Je ziekmelding is bevestigd. Beterschap! Meld je beter in de app zodra je weer kunt werken.`);
+    await A.melding(z.medewerker_id, namens ? `${beheerNaam()} heeft je ziek gemeld. Beterschap! Meld je beter in de app zodra je weer kunt werken.` : `Je ziekmelding is bevestigd. Beterschap! Meld je beter in de app zodra je weer kunt werken.`);
     await herlaad(); opnieuw();
     A.toast('Bevestigd' + (open ? ` – ${open} dienst(en) open, collega's hebben bericht gekregen` : ''), 'ok');
+  }
+
+  // Medewerker belt Ricardo: hij zet de ziekmelding zelf in de app (telt mee in het verzuimoverzicht)
+  async function ziekNamens(mid) {
+    const mws = actieveMw().filter(m => !A.data.ziekmeldingen.some(z => z.medewerker_id === m.id && z.status !== 'afgewezen' && (!z.tot || z.tot >= G.today())));
+    if (!mws.length) return A.toast('Iedereen staat al ziek gemeld', 'fout');
+    const nuLokaal = (() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); })();
+    const dienstStart = x => new Date(x.datum + 'T' + x.start + ':00');
+    const komend = id => A.data.diensten.filter(x => x.medewerker_id === id && x.datum >= G.addDays(G.today(), -1) && x.datum <= G.addDays(G.today(), 7) && dienstStart(x) > new Date(Date.now() - 4 * 3600e3))
+      .sort((a, b) => dienstStart(a) - dienstStart(b));
+    const lijst = id => { const ds = komend(id);
+      return ds.length ? ds.map((x, i) => `<label class="check" style="margin:.35em 0"><input type="checkbox" class="znDienst" value="${x.id}" ${i === 0 ? 'checked' : ''}> ${esc(A.datumKort(x.datum))} · ${tijd(x)} · ${esc(x.functie)}</label>`).join('') : '<p class="zacht" style="margin:.2em 0">Geen diensten de komende week.</p>'; };
+    const eerste = mid && mws.some(m => m.id === mid) ? mid : mws[0].id;
+    const res = await A.modal('Ziek melden namens medewerker', `
+      <p class="zacht" style="margin-top:-.3em">Gebruik dit als iemand je belt in plaats van het in de app te doen. Het telt gewoon mee in het verzuimoverzicht.</p>
+      <div class="rij"><div class="veld"><label>Wie is ziek?</label><select id="znMw">${mws.map(m => `<option value="${m.id}" ${m.id === eerste ? 'selected' : ''}>${esc(m.naam)}</option>`).join('')}</select></div>
+        <div class="veld"><label>Wanneer belde hij/zij?</label><input type="datetime-local" id="znTijd" value="${nuLokaal}"></div></div>
+      <div class="veld"><label>Welke diensten vervallen?</label><div id="znDiensten">${lijst(eerste)}</div></div>
+      <div class="veld"><label>Ziek vanaf</label><input type="date" id="znVan" value="${G.today()}" style="max-width:200px"></div>
+      <div class="veld"><label>Notitie (alleen voor jou)</label><input id="znNot" placeholder="bv. klonk erg verkouden, belt morgen terug"></div>`,
+      [{ label: 'Annuleren', waarde: null }, { label: 'Volgende: vervanging regelen', soort: 'primair',
+        controle: bg => !bg.querySelector('#znTijd').value ? 'Vul in wanneer er gebeld werd' : null,
+        waarde: bg => ({ mid: bg.querySelector('#znMw').value, tijd: bg.querySelector('#znTijd').value, van: bg.querySelector('#znVan').value || G.today(), not: bg.querySelector('#znNot').value, ids: [...bg.querySelectorAll('.znDienst:checked')].map(i => i.value) }) }],
+      bg => { bg.querySelector('#znMw').onchange = e => { bg.querySelector('#znDiensten').innerHTML = lijst(e.target.value); }; });
+    if (!res) return;
+    const gebeld = new Date(res.tijd);
+    const ds = res.ids.map(id => A.data.diensten.find(x => x.id === id)).filter(Boolean).sort((a, b) => dienstStart(a) - dienstStart(b));
+    const minuten = ds[0] ? Math.round((dienstStart(ds[0]) - gebeld) / 60000) : null;
+    const van = ds[0] && ds[0].datum < res.van ? ds[0].datum : res.van;
+    const [z] = await Store.insert('ziekmeldingen', { medewerker_id: res.mid, gemeld_op: gebeld.toISOString(), van, tot: null, dienst_ids: res.ids, minuten_voor_dienst: minuten, status: 'gemeld', opmerking: '', notitie_beheer: res.not, gemeld_door: 'beheer' });
+    await herlaad();
+    const id = (z && z.id) || (A.data.ziekmeldingen.find(x => x.medewerker_id === res.mid && x.status === 'gemeld') || {}).id;
+    if (id) await ziekBevestigen(id, true);
   }
 
   async function ziekAfwijzen(id) {
@@ -861,19 +960,111 @@
     return { zs, n: zs.length, kwartN, dagen, gem, kort, diensten: zs.reduce((t, z) => t + (z.dienst_ids || []).length, 0), signalen };
   }
 
+  // ---------------- medewerkerkaart: alles over één persoon ----------------
+  const duurTekst = u => u == null ? '–' : u < 1 ? Math.max(1, Math.round(u * 60)) + ' min' : u < 48 ? Math.round(u) + ' uur' : Math.round(u / 24) + ' dagen';
+  const mediaan = l => { if (!l.length) return null; const a = l.slice().sort((x, y) => x - y), h = a.length >> 1; return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2; };
+  function personeelStats(m) {
+    const d = A.data, nu = G.today(), jaar = G.addDays(nu, -365), kwart = G.addDays(nu, -91), mid = m.id;
+    // 1. Feesten: gevraagd / gereageerd / hoe snel
+    const feesten = d.zalen_events.concat(d.geannuleerd || []).filter(e => e.uitvraag && e.datum >= jaar && e.datum <= G.addDays(nu, 90))
+      .filter(e => (e.uitvraag_gevraagd && e.uitvraag_gevraagd.length) ? e.uitvraag_gevraagd.includes(mid) : G.uitvraagGroep(e, d).some(x => x.id === mid));
+    const uv = { gevraagd: 0, kan: 0, niet: 0, geen: 0, loopt: 0, tijden: [] };
+    for (const e of feesten) {
+      const r = d.event_reacties.find(x => x.event_id === e.id && x.medewerker_id === mid);
+      if (!r) { if (e.status === 'open') uv.loopt++; else { uv.gevraagd++; uv.geen++; } continue; }
+      uv.gevraagd++; r.kan ? uv.kan++ : uv.niet++;
+      const t0 = e.uitvraag_start, t1 = r.eerste_tijd || r.tijd;
+      if (t0 && t1 && t1 >= t0) uv.tijden.push((new Date(t1) - new Date(t0)) / 36e5);
+    }
+    // 2. Open cafetariadiensten (uitvraag per maand)
+    for (const r of d.roosters.filter(r => r.maand >= jaar.slice(0, 7) && (+r.ronde || 1) >= 2 || (r.caf_gevraagd || []).length)) {
+      const gevraagd = (r.caf_gevraagd && r.caf_gevraagd.length) ? r.caf_gevraagd.includes(mid) : (G.isCafOproep(m) && (m.locaties || []).includes('cafetaria'));
+      if (!gevraagd) continue;
+      const ids = new Set(d.diensten.filter(x => x.maand === r.maand && x.locatie === 'cafetaria').map(x => x.id));
+      const rs = d.event_reacties.filter(x => x.dienst_id && ids.has(x.dienst_id) && x.medewerker_id === mid);
+      if (!rs.length) { if (r.status === 'voorlopig') uv.loopt++; else { uv.gevraagd++; uv.geen++; } continue; }
+      uv.gevraagd++; rs.some(x => x.kan) ? uv.kan++ : uv.niet++;
+      const t0 = r.ronde2_op, t1 = rs.map(x => x.eerste_tijd || x.tijd).sort()[0];
+      if (t0 && t1 && t1 >= t0) uv.tijden.push((new Date(t1) - new Date(t0)) / 36e5);
+    }
+    uv.pct = uv.gevraagd ? Math.round((uv.kan + uv.niet) / uv.gevraagd * 100) : null;
+    uv.snelheid = mediaan(uv.tijden);
+    // 3. Werk
+    const gewerkt = d.diensten.filter(x => x.medewerker_id === mid && x.datum < nu && x.datum >= kwart);
+    const opgepakt = d.diensten.filter(x => x.opgepakt_door === mid && (x.opgepakt_op || '').slice(0, 10) >= jaar).length;
+    const ruilAangeboden = d.ruilverzoeken.filter(r => r.van_id === mid && (r.aangemaakt_op || '').slice(0, 10) >= kwart).length;
+    const ruilOvergenomen = d.ruilverzoeken.filter(r => r.naar_id === mid && r.status === 'goedgekeurd' && (r.aangemaakt_op || '').slice(0, 10) >= jaar).length;
+    const vrij = d.verlof.filter(v => v.medewerker_id === mid && v.van >= jaar);
+    const vrijDagen = vrij.filter(v => v.status === 'goedgekeurd').reduce((t, v) => t + Math.round((G.parse(v.tot) - G.parse(v.van)) / 864e5) + 1, 0);
+    const maand = G.monthOf(nu), uren = urenVan(mid, maand), doel = G.doelUren(m, maand);
+    const vz = verzuimStats(mid);
+    // 4. Samenvatting
+    const goed = [], let_ = [];
+    if (uv.gevraagd >= 3 && uv.pct >= 80) goed.push('reageert bijna altijd');
+    if (uv.snelheid != null && uv.tijden.length >= 2 && uv.snelheid <= 12) goed.push('reageert snel');
+    if (opgepakt >= 2) goed.push(`pakt open diensten op (${opgepakt}×)`);
+    if (ruilOvergenomen >= 2) goed.push(`neemt diensten over van collega's (${ruilOvergenomen}×)`);
+    if (!vz.n && gewerkt.length >= 5) goed.push('niet ziek geweest');
+    if (uv.gevraagd >= 3 && uv.pct < 50) let_.push(`reageert vaak niet (${uv.geen} van ${uv.gevraagd}× geen reactie)`);
+    if (uv.snelheid != null && uv.tijden.length >= 3 && uv.snelheid > 96) let_.push('reageert traag');
+    if (vz.n >= 3 || vz.kwartN >= 2) let_.push(`vaak ziek (${vz.n}× in 12 mnd)`);
+    if (vz.kort >= 2) let_.push(`${vz.kort}× kort van tevoren ziek`);
+    if (ruilAangeboden >= 4) let_.push(`biedt vaak diensten aan (${ruilAangeboden}× in 3 mnd)`);
+    return { uv, gewerkt, opgepakt, ruilAangeboden, ruilOvergenomen, vrij, vrijDagen, uren, doel, vz, goed, let: let_ };
+  }
+  const oordeelLabel = st => st.let.length ? '<span class="label let">⚠️ let op</span>' : st.goed.length ? '<span class="label ok">👍 goed</span>' : '<span class="label">–</span>';
+
+  function pMedewerker(mid) {
+    const m = A.mw(mid);
+    if (!m) { location.hash = 'personeel'; return; }
+    const st = personeelStats(m), uv = st.uv, vz = st.vz;
+    const tegel = (getal, wat, sub, kl) => `<div class="tegel ${kl || ''}"><div class="getal" style="font-size:1.6rem">${getal}</div><div class="wat">${wat}${sub ? `<br><small>${sub}</small>` : ''}</div></div>`;
+    const komend = A.data.diensten.filter(x => x.medewerker_id === mid && x.datum >= G.today()).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start)).slice(0, 6);
+    hoofd.innerHTML = `<div class="kop"><div style="display:flex;align-items:center;gap:.7em"><a class="knop klein" href="#personeel">← Personeel</a>${avatar(m)}<div><h1 style="margin:0">${esc(m.naam)}</h1><span class="zacht">${+m.contracturen ? A.uren(+m.contracturen) + ' uur per week' : 'oproepkracht'} · ${functieTekst(m)}${m.telefoon ? ' · ' + esc(m.telefoon) : ''}</span></div></div>
+        <div class="acties">${m.telefoon ? `<a class="knop" href="tel:${esc(m.telefoon.replace(/[^\d+]/g, ''))}">📞 Bellen</a>` : ''}<button class="knop" id="mkUitnodig" type="button">📲 Uitnodigen</button><button class="knop primair" id="mkWijzig" type="button">✏️ Gegevens wijzigen</button></div></div>
+      <div class="statusbalk ${st.let.length ? 'concept' : 'gepubliceerd'}" style="margin-bottom:1em">${st.let.length ? '⚠️' : '👍'} <div>
+        ${st.goed.length ? `<div><b>Goed:</b> ${st.goed.map(esc).join(' · ')}</div>` : ''}
+        ${st.let.length ? `<div><b>Let op:</b> ${st.let.map(esc).join(' · ')}</div>` : ''}
+        ${!st.goed.length && !st.let.length ? '<div>Nog te weinig gegevens voor een beeld. Dat komt vanzelf als de app een tijdje in gebruik is.</div>' : ''}</div></div>
+      <div class="tegels">
+        ${tegel(A.uren(st.uren) + (st.doel ? ' <small style="font-size:.9rem" class="zacht">/ ' + Math.round(st.doel) + '</small>' : ''), 'uur ingepland deze maand', st.doel ? (st.uren < st.doel * .85 ? 'onder contract' : st.uren > st.doel * 1.1 ? 'boven contract' : 'rond contract') : '')}
+        ${tegel(st.gewerkt.length, 'diensten gewerkt', 'laatste 3 maanden · ' + A.uren(st.gewerkt.reduce((t, x) => t + G.hours(x.start, x.eind), 0)) + ' uur')}
+        ${tegel(vz.n, 'keer ziek', `12 mnd · ${vz.dagen} dag${vz.dagen === 1 ? '' : 'en'}${vz.kort ? ' · ' + vz.kort + '× < 2 uur van tevoren' : ''}`, vz.signalen.length ? 'aandacht' : '')}
+        ${tegel(uv.pct == null ? '–' : uv.pct + '%', 'reageert op oproepen', uv.gevraagd ? `${uv.gevraagd}× gevraagd · ${uv.kan}× kan · ${uv.niet}× niet · ${uv.geen}× geen reactie` : 'nog niet gevraagd', uv.gevraagd >= 3 && uv.pct < 50 ? 'aandacht' : '')}
+        ${tegel(duurTekst(uv.snelheid), 'reactietijd', uv.tijden.length ? 'gemiddeld (mediaan van ' + uv.tijden.length + ')' : 'nog niet bekend')}
+        ${tegel(st.opgepakt, 'open diensten opgepakt', '12 maanden')}
+        ${tegel(st.ruilAangeboden + ' / ' + st.ruilOvergenomen, 'ruilen: aangeboden / overgenomen', 'aangeboden: 3 mnd · overgenomen: 12 mnd')}
+        ${tegel(st.vrijDagen, 'dagen vrij gehad', st.vrij.length + '× gevraagd (12 mnd)')}
+      </div>
+      ${uv.loopt ? `<p class="zacht" style="margin-top:-.4em">Er ${uv.loopt === 1 ? 'loopt nog 1 oproep' : 'lopen nog ' + uv.loopt + ' oproepen'} waarop ${esc(m.naam)} nog kan reageren; die tellen nog niet mee.</p>` : ''}
+      <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
+        <div class="paneel"><div class="paneel-kop"><h3>Komende diensten</h3></div>
+          ${komend.length ? komend.map(x => `<div class="item"><div class="datumblok ${x.locatie}"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div><div><div class="wie">${tijd(x)} · ${esc(x.functie)}</div><div class="meta">${esc(A.datumLang(x.datum))}${x.event_id && A.event(x.event_id) ? ' · 🎉 ' + esc(A.event(x.event_id).naam) : ''}</div></div><div class="rechts">${locLabel(x.locatie)}</div></div>`).join('') : '<div class="leeg">Geen diensten gepland</div>'}</div>
+        <div class="paneel"><div class="paneel-kop"><h3>Verzuim en gesprekken</h3><button class="knop klein" id="mkVerzuim" type="button">Bekijken / gesprek vastleggen</button></div>
+          ${vz.signalen.length ? `<p>${vz.signalen.join(' ')}</p>` : ''}
+          ${vz.zs.slice(0, 4).map(z => `<div class="item"><div><div class="wie">${esc(A.datumKort(z.van))}</div><div class="meta">${meldtijdTekst(z.minuten_voor_dienst)} van tevoren gemeld${z.gemeld_door === 'beheer' ? ' (gebeld)' : ''}</div></div><div class="rechts"><span class="label ${z.status === 'bevestigd' ? 'ok' : 'let'}">${esc(z.status)}</span></div></div>`).join('') || '<div class="leeg">Niet ziek geweest</div>'}
+          ${m.notitie ? `<p class="zacht" style="white-space:pre-wrap;font-size:.88rem;margin:.6em 0 0">📝 ${esc(m.notitie)}</p>` : ''}</div>
+      </div>
+      <p class="zacht" style="font-size:.85rem">"Reageert op oproepen" telt feesten en open cafetariadiensten waarvoor ${esc(m.naam)} een bericht kreeg. De reactietijd wordt bijgehouden vanaf versie 1.9; oudere oproepen tellen daarvoor niet mee.</p>`;
+    $('#mkWijzig').onclick = () => mwModal(m);
+    $('#mkUitnodig').onclick = () => uitnodigen(m);
+    $('#mkVerzuim').onclick = async () => { await verzuimDetail(mid); pMedewerker(mid); };
+  }
+
   function pVerzuim() {
     const rijen = A.data.medewerkers.filter(m => m.actief !== false).map(m => ({ m, ...verzuimStats(m.id) })).sort((a, b) => b.n - a.n || b.dagen - a.dagen || a.m.naam.localeCompare(b.m.naam));
     const totaal = rijen.reduce((t, r) => t + r.n, 0);
-    hoofd.innerHTML = `<div class="kop"><h1>Verzuim</h1><a class="knop" href="#aanvragen/ziek">Ziekmeldingen</a></div>
+    hoofd.innerHTML = `<div class="kop"><h1>Verzuim</h1><div class="acties"><button class="knop primair" id="vzNamens" type="button">🤒 Iemand belde: ziek melden</button><a class="knop" href="#aanvragen/ziek">Ziekmeldingen</a></div></div>
       <p class="zacht">Overzicht van de afgelopen 12 maanden. Zo zie je snel wie zich vaak ziek meldt, of vaak kort voor de dienst. Klik op een naam voor de details en om een gesprek vast te leggen.</p>
       <div class="tegels"><div class="tegel"><div class="getal">${totaal}</div><div class="wat">ziekmeldingen (12 mnd)</div></div>
         <div class="tegel"><div class="getal">${A.data.ziekmeldingen.filter(z => z.status === 'bevestigd' && (!z.tot || z.tot >= G.today())).length}</div><div class="wat">nu ziek</div></div>
         <div class="tegel ${rijen.some(r => r.signalen.length) ? 'aandacht' : ''}"><div class="getal">${rijen.filter(r => r.signalen.length).length}</div><div class="wat">medewerkers met een signaal</div></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Medewerker</th><th>Meldingen</th><th>Laatste 3 mnd</th><th>Ziektedagen</th><th>Gemiste diensten</th><th>Gem. gemeld vooraf</th><th>Laatste melding</th><th>Signaal</th></tr></thead><tbody>
-      ${rijen.map(r => `<tr class="klik" data-vz="${r.m.id}"><td><span class="stip" style="background:${esc(r.m.kleur)}"></span> <b>${esc(r.m.naam)}</b></td><td>${r.n || '<span class="zacht">0</span>'}</td><td>${r.kwartN || '<span class="zacht">0</span>'}</td><td>${r.dagen || '<span class="zacht">0</span>'}</td><td>${r.diensten || '<span class="zacht">0</span>'}</td>
+      ${rijen.map(r => `<tr class="klik" data-vz="${r.m.id}"><td><span class="stip" style="background:${esc(r.m.kleur)}"></span> <b>${esc(r.m.naam)}</b> <a href="#personeel/${r.m.id}" class="zacht" style="font-size:.8rem" title="Alles over ${esc(r.m.naam)}">kaart ›</a></td><td>${r.n || '<span class="zacht">0</span>'}</td><td>${r.kwartN || '<span class="zacht">0</span>'}</td><td>${r.dagen || '<span class="zacht">0</span>'}</td><td>${r.diensten || '<span class="zacht">0</span>'}</td>
         <td>${r.gem == null ? '<span class="zacht">–</span>' : meldtijdTekst(Math.round(r.gem))}${r.kort ? ` <small class="zacht">(${r.kort}× &lt; 2 uur)</small>` : ''}</td><td>${r.zs[0] ? esc(A.datumKort(r.zs[0].van)) : '<span class="zacht">–</span>'}</td><td>${r.signalen.join(' ')}</td></tr>`).join('')}
       </tbody></table></div><p class="zacht" style="font-size:.85rem;margin:.8em 0 0">Signalen: <b>gesprek aanbevolen</b> bij 3 of meer meldingen in een jaar, of 2 in drie maanden. <b>Vaak kort van tevoren</b> bij 2 of meer meldingen minder dan 2 uur voor de dienst. De app legt bewust géén ziekteoorzaak vast; dat mag een werkgever niet registreren.</p></div>`;
-    hoofd.querySelectorAll('[data-vz]').forEach(r => r.onclick = () => verzuimDetail(r.dataset.vz));
+    hoofd.querySelectorAll('[data-vz]').forEach(r => r.onclick = e => { if (!e.target.closest('a')) verzuimDetail(r.dataset.vz); });
+    $('#vzNamens').onclick = () => ziekNamens();
   }
 
   async function verzuimDetail(mid) {
@@ -883,7 +1074,7 @@
       <div class="rij" style="margin-bottom:.8em"><div><div style="font-size:1.5rem;font-weight:800">${st.n}</div><small class="zacht">meldingen (12 mnd)</small></div><div><div style="font-size:1.5rem;font-weight:800">${st.dagen}</div><small class="zacht">ziektedagen</small></div><div><div style="font-size:1.5rem;font-weight:800">${st.gem == null ? '–' : meldtijdTekst(Math.round(st.gem))}</div><small class="zacht">gem. vooraf gemeld</small></div></div>
       ${st.signalen.length ? `<p>${st.signalen.join(' ')}</p>` : ''}
       ${alle.length ? `<table class="lijst"><thead><tr><th>Datum</th><th>Duur</th><th>Gemeld vooraf</th><th>Status</th></tr></thead><tbody>${alle.map(z => { const eind = !z.tot || z.tot > G.today() ? null : z.tot; const d = eind ? Math.round((G.parse(eind) - G.parse(z.van)) / 864e5) + 1 : null;
-        return `<tr><td>${esc(A.datumKort(z.van))}${z.notitie_beheer ? `<br><small class="zacht">${esc(z.notitie_beheer)}</small>` : ''}</td><td>${d ? d + ' dag' + (d > 1 ? 'en' : '') : '<span class="label fout">nog ziek</span>'}</td><td>${meldtijdTekst(z.minuten_voor_dienst)}</td><td><span class="label ${z.status === 'bevestigd' ? 'ok' : z.status === 'gemeld' ? 'let' : 'fout'}">${z.status}</span></td></tr>`; }).join('')}</tbody></table>` : '<p class="zacht">Nog nooit ziek gemeld.</p>'}
+        return `<tr><td>${esc(A.datumKort(z.van))}${z.notitie_beheer ? `<br><small class="zacht">${esc(z.notitie_beheer)}</small>` : ''}</td><td>${d ? d + ' dag' + (d > 1 ? 'en' : '') : '<span class="label fout">nog ziek</span>'}</td><td>${meldtijdTekst(z.minuten_voor_dienst)}${z.gemeld_door === 'beheer' ? ' <small class="zacht">(gebeld)</small>' : ''}</td><td><span class="label ${z.status === 'bevestigd' ? 'ok' : z.status === 'gemeld' ? 'let' : 'fout'}">${z.status}</span></td></tr>`; }).join('')}</tbody></table>` : '<p class="zacht">Nog nooit ziek gemeld.</p>'}
       <div class="veld" style="margin-top:1em"><label>Gesprekken en afspraken <small>(alleen voor jou)</small></label><textarea id="vzNot" rows="5" placeholder="bv. 12-11: gesprek gehad over vaak ziek op zondag. Afspraak: …">${esc(m.notitie || '')}</textarea>
         <button class="knop klein plat" id="vzDatum" type="button" style="margin-top:.3em">+ Gesprek van vandaag toevoegen</button></div>`,
       [{ label: 'Sluiten', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => bg.querySelector('#vzNot').value }],
@@ -970,7 +1161,7 @@
   function uitvraagLabel(e) {
     if (e.status !== 'open') return '';
     const st = uitvraagStand(e);
-    return `<span class="label let" title="Reacties oproepkrachten">⏳ uitvraag t/m ${esc(A.datumKort(e.uitvraag_tot))} · ${st.kan} kan, ${st.kanNiet} niet, ${st.geen} geen reactie</span>`;
+    return `<span class="label let" title="Reacties oproepkrachten">⏳ oproep loopt t/m ${esc(A.datumKort(e.uitvraag_tot))} · ${st.kan} kan, ${st.kanNiet} niet, ${st.geen} geen reactie</span>`;
   }
   // Duidelijk overzicht van een lopende uitvraag: kleur, balk "kan / nodig", per functie en wie wat zei.
   function uitvraagOverzicht(e) {
@@ -1021,7 +1212,7 @@
         <label class="check"><input type="radio" name="pushWie" value="geen" ${nGeen ? 'checked' : 'disabled'}> Alleen wie nog niet heeft gereageerd <span class="zacht">(${nGeen})</span></label>
         <label class="check"><input type="radio" name="pushWie" value="alle" ${nGeen ? '' : 'checked'}> Alle oproepkrachten die gevraagd zijn <span class="zacht">(${nAlle})</span></label>
         <button class="knop primair" type="button" id="pushOpnieuw" ${nAlle ? '' : 'disabled'}>🔔 Pushmelding sturen</button></div>`;
-    return A.modal('Uitvraag delen', `${pushHtml}<p style="margin-top:1em">Of zet het in de WhatsApp-groep:</p><textarea id="waTekst" rows="8">${esc(tekst)}</textarea>`,
+    return A.modal('Oproep delen', `${pushHtml}<p style="margin-top:1em">Of zet het in de WhatsApp-groep:</p><textarea id="waTekst" rows="8">${esc(tekst)}</textarea>`,
       [{ label: 'Sluiten', waarde: null }, { label: '💬 Open WhatsApp', soort: 'ok', waarde: bg => { window.open('https://wa.me/?text=' + encodeURIComponent(bg.querySelector('#waTekst').value), '_blank'); return true; } }],
       bg => {
         const knop = bg.querySelector('#pushOpnieuw');
@@ -1060,7 +1251,7 @@
       <button class="knop klein" id="mRij" type="button">+ Nog een feest</button>
       <p class="zacht" style="font-size:.82rem">De bezetting wordt voorgesteld op basis van het aantal gasten (in te stellen bij Instellingen). Met <b>✏️ Aanpassen</b> zet je per feest zelf hoeveel mensen er per functie nodig zijn.</p>
       <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em;margin-top:.6em">
-        <label class="check"><input type="checkbox" id="mUit" checked> Oproepkrachten laten reageren (uitvraag)</label>
+        <label class="check"><input type="checkbox" id="mUit" checked> Oproepkrachten vragen wie kan</label>
         <div id="mUitWrap" style="margin-top:.5em"><label>Reageren kan tot en met</label><input type="date" id="mUitTot" value="${esc(G.addDays(nu, dagenUit))}" style="max-width:200px">
         <small class="zacht" style="display:block;margin-top:.3em">Ligt een feest eerder, dan stopt de termijn voor dat feest vanzelf 2 dagen ervoor.</small></div></div>`;
     const leesBezRij = r => [...r.querySelectorAll('.mf-fns input')].map(i => ({ functie: i.dataset.fn, aantal: +i.value || 0 })).filter(b => b.aantal > 0);
@@ -1097,6 +1288,9 @@
       if (res.uitvraag) { tot = res.tot || G.addDays(nu, dagenUit); const max = G.addDays(r.datum, -2); if (tot > max) tot = max < nu ? nu : max; }
       return { id: Store.uuid(), datum: r.datum, naam: r.naam, zaal: '', start: r.start || '19:00', eind: r.eind || '00:30', gasten: r.gasten, bezetting: r.bezetting.length ? r.bezetting : standaardBezetting(r.gasten), notitie: '',
         uitvraag: res.uitvraag, uitvraag_tot: tot, status: res.uitvraag ? 'open' : null, herinnerd: false };
+    }).map(e => {
+      if (e.uitvraag) { e.uitvraag_start = new Date().toISOString(); e.uitvraag_gevraagd = G.uitvraagGroep(e, A.data).map(m => m.id); }
+      return e;
     }).sort((a, b) => a.datum.localeCompare(b.datum));
     await Store.insert('zalen_events', events);
     await herlaad();
@@ -1152,13 +1346,13 @@
 
     hoofd.innerHTML = `<div class="kop"><h1>Zalencentrum</h1><div class="acties">
         <label class="check"><input type="checkbox" id="verleden" ${staat.zalenVerleden ? 'checked' : ''}> Afgelopen feesten</label>
-        ${lopend.length ? '<button class="knop" id="deelUitvraag">💬 Uitvraag delen</button>' : ''}
+        ${lopend.length ? '<button class="knop" id="deelUitvraag">💬 Oproep delen</button>' : ''}
         ${concepten.length ? `<button class="knop ok" id="verstuurEvents">📤 Versturen (${concepten.length})</button>` : ''}
         <button class="knop" id="nieuwEvs">+ Meerdere feesten</button>
         <button class="knop primair" id="nieuwEv">+ Feest toevoegen</button></div></div>
-      <p class="zacht">Zet hier alle feesten in. Met <b>uitvraag</b> krijgen de oproepkrachten een melding en ${esc(A.data.instellingen.uitvraag_dagen || 7)} dagen om te laten weten of ze kunnen. Daarna wordt het feest automatisch ingepland: eerst vast personeel (tot hun contracturen), daarna de oproepkrachten eerlijk verdeeld.</p>
+      <p class="zacht">Zet hier alle feesten in. Met <b>oproepkrachten vragen</b> krijgen de oproepkrachten een melding en ${esc(A.data.instellingen.uitvraag_dagen || 7)} dagen om te laten weten of ze kunnen. Daarna wordt het feest automatisch ingepland: eerst vast personeel (tot hun contracturen), daarna de oproepkrachten eerlijk verdeeld.</p>
       <p class="zacht uv-legenda"><span class="uv-fn ok">groen</span> genoeg oproepkrachten kunnen · <span class="uv-fn let">oranje</span> nog mensen nodig · <span class="uv-fn fout">rood</span> niemand kan · grijs: nog geen reacties. <span style="opacity:.8">(Vast personeel komt daar bij het inplannen nog bij.)</span></p>
-      ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${A.rooster(m) ? `<span class="label ${A.isGepubliceerd(m) ? 'ok' : 'let'}">rooster ${A.isGepubliceerd(m) ? "verstuurd" : "concept"}</span>` : '<span class="label">nog geen maandrooster</span>'}</div>
+      ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${A.rooster(m) ? `<span class="label ${A.isGepubliceerd(m) ? 'ok' : 'let'}">rooster ${A.isGepubliceerd(m) ? "verstuurd" : "nog niet verstuurd"}</span>` : '<span class="label">nog geen maandrooster</span>'}</div>
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
           const uv = e.status === 'open' ? uitvraagOverzicht(e) : null;
           const status = uv ? uv.rechts : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
@@ -1170,15 +1364,16 @@
           <div class="rechts">${status}</div></div>`; }).join('')}</div>`).join('')
         : `<div class="paneel"><div class="leeg"><span class="groot">🎉</span>${staat.zalenVerleden ? 'Geen afgelopen feesten' : 'Nog geen feesten gepland'}</div></div>`}
       ${verdeling.length ? `<div class="paneel"><div class="paneel-kop"><h3>Verdeling oproepkrachten</h3><small class="zacht">afgelopen 3 maanden + wat al gepland staat</small></div>
-        <table class="lijst"><thead><tr><th>Oproepkracht</th><th>Diensten</th><th>Uren</th><th style="width:35%"></th><th>Zei 'kan'</th></tr></thead><tbody>
-        ${verdeling.map(v => `<tr><td><span class="stip" style="background:${esc(v.m.kleur)}"></span> <b>${esc(v.m.naam)}</b></td><td>${v.n}</td><td>${A.uren(v.u)}</td><td><div class="balk"><i style="width:${v.u / maxU * 100}%;background:var(--zaal)"></i></div></td><td>${v.kan}×</td></tr>`).join('')}
-        </tbody></table><p class="zacht" style="font-size:.85rem;margin:.6em 0 0">Wie minder heeft gewerkt, krijgt bij de volgende feesten voorrang, mits hij of zij heeft aangegeven te kunnen.</p></div>` : ''}`;
+        <div class="tabel-wrap"><table class="lijst"><thead><tr><th>Oproepkracht</th><th>Diensten</th><th>Uren</th><th style="width:28%"></th><th>Zei 'kan'</th><th>Reageert</th><th>Reactietijd</th></tr></thead><tbody>
+        ${verdeling.map(v => { const st = personeelStats(v.m).uv; return `<tr class="klik" data-kaart="${v.m.id}"><td><span class="stip" style="background:${esc(v.m.kleur)}"></span> <b>${esc(v.m.naam)}</b></td><td>${v.n}</td><td>${A.uren(v.u)}</td><td><div class="balk"><i style="width:${v.u / maxU * 100}%;background:var(--zaal)"></i></div></td><td>${v.kan}×</td><td>${st.pct == null ? '<span class="zacht">–</span>' : `<span class="label ${st.pct >= 80 ? 'ok' : st.pct < 50 ? 'fout' : 'let'}">${st.pct}%</span> <small class="zacht">${st.gevraagd - st.geen}/${st.gevraagd}</small>`}</td><td>${duurTekst(st.snelheid)}</td></tr>`; }).join('')}
+        </tbody></table></div><p class="zacht" style="font-size:.85rem;margin:.6em 0 0">Klik op een naam voor alles over die persoon. Wie minder heeft gewerkt, krijgt bij de volgende feesten voorrang, mits hij of zij heeft aangegeven te kunnen.</p></div>` : ''}`;
     $('#nieuwEv').onclick = () => eventModal(null);
     $('#nieuwEvs').onclick = () => meerdereFeesten();
     $('#verleden').onchange = e => { staat.zalenVerleden = e.target.checked; pZalen(); };
     if ($('#deelUitvraag')) $('#deelUitvraag').onclick = () => deelUitvraagWhatsApp(lopend);
     if ($('#verstuurEvents')) $('#verstuurEvents').onclick = () => verstuurEvents(concepten);
     hoofd.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
+    hoofd.querySelectorAll('[data-kaart]').forEach(x => x.onclick = () => { location.hash = 'personeel/' + x.dataset.kaart; });
   }
 
   // Standaardbezetting op basis van gasten. De regels stel je in bij Instellingen → Standaard bezetting feesten.
@@ -1216,15 +1411,15 @@
         const knop = r && r.kan && e.status === 'open' ? (bev ? `<button class="knop klein plat" type="button" data-bev-weg="${r.id}">Intrekken</button>` : `<button class="knop klein ok" type="button" data-bev="${r.id}">Bevestigen</button>`) : '';
         return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>${r.aangeboden ? ` <span class="label let">🔁 ${r.overname_door ? esc(A.mwNaam(r.overname_door)) + ' wil overnemen' : 'aangeboden'}</span>` : ''}` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
-        <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu inplannen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
+        <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu indelen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
         ${e.status === 'concept' || e.status === 'ingepland' ? indelingHtml(e) : e.status === 'open' ? voorlopigIndelingHtml(e) : ''}
         ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
-        ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de uitvraag gaat weer open. Reacties blijven staan.</small></div>' : ''}
-        ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu inplannen" sluit de uitvraag meteen af. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
+        ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de oproep gaat weer open. Reacties blijven staan.</small></div>' : ''}
+        ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu indelen" stopt met wachten en deelt het feest meteen in. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
     }
     const uitvraagHtml = (nieuw || e.status === 'open' || !e.status) ? `
       <div class="veld" style="background:var(--zaal-licht);border-radius:10px;padding:.7em .9em">
-        <label class="check"><input type="checkbox" id="eUitvraag" ${e.uitvraag ? 'checked' : ''} ${!nieuw && e.status === 'open' ? 'disabled' : ''}> Oproepkrachten laten reageren (uitvraag)</label>
+        <label class="check"><input type="checkbox" id="eUitvraag" ${e.uitvraag ? 'checked' : ''} ${!nieuw && e.status === 'open' ? 'disabled' : ''}> Oproepkrachten vragen wie kan</label>
         <div id="eUitWrap" style="margin-top:.5em;${e.uitvraag ? '' : 'display:none'}"><label>Reageren kan tot en met</label><input type="date" id="eUitTot" value="${esc(e.uitvraag_tot || U_standaard(e.datum))}" style="max-width:200px">
         <small class="zacht" style="display:block;margin-top:.3em">Daarna wordt het feest automatisch ingepland. Zet je meerdere feesten tegelijk in, dan worden ze samen verdeeld.</small></div></div>` : '';
     function U_standaard(datum) { return Uitvraag.standaardTermijn(datum, dagenUit, nu); }
@@ -1392,27 +1587,27 @@
       const et = bg.querySelector('#eTerug');
       if (et) et.onclick = () => A.bezig(et, async () => {
         const ev0 = A.event(e.id), vandaag = G.today();
-        if (vandaag >= G.addDays(ev0.datum, -1)) return A.toast('Dit feest is te dichtbij om de uitvraag weer te openen. Pas de indeling aan via het rooster.', 'fout');
+        if (vandaag >= G.addDays(ev0.datum, -1)) return A.toast('Dit feest is te dichtbij om de oproep weer te openen. Pas de indeling aan via het rooster.', 'fout');
         let tot = ev0.uitvraag_tot && ev0.uitvraag_tot >= vandaag ? ev0.uitvraag_tot : Uitvraag.standaardTermijn(ev0.datum, dagenUit, vandaag);
         if (!tot || tot < vandaag) tot = vandaag;
         if (tot >= G.addDays(ev0.datum, -1)) tot = G.addDays(ev0.datum, -2) >= vandaag ? G.addDays(ev0.datum, -2) : vandaag;
         const ds = A.data.diensten.filter(x => x.event_id === ev0.id), mensen = ds.filter(x => x.medewerker_id);
         const verstuurd = ev0.status === 'ingepland';
-        if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${ev0.naam} vervalt${verstuurd && mensen.length ? ` en ${mensen.length} ${mensen.length === 1 ? 'persoon krijgt' : 'mensen krijgen'} daar een melding van` : ''}. De uitvraag gaat weer open t/m ${A.datumLang(tot)}. Wie al heeft gereageerd, hoeft dat niet opnieuw te doen.`, 'Ongedaan maken')) return;
+        if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${ev0.naam} vervalt${verstuurd && mensen.length ? ` en ${mensen.length} ${mensen.length === 1 ? 'persoon krijgt' : 'mensen krijgen'} daar een melding van` : ''}. De oproep gaat weer open t/m ${A.datumLang(tot)}. Wie al heeft gereageerd, hoeft dat niet opnieuw te doen.`, 'Ongedaan maken')) return;
         const bezInh = G.inhuurInBezetting(ev0.bezetting, ds, A.data);
         await Store.update('zalen_events', ev0.id, { bezetting: bezInh });
         for (const x of ds) {
           await Store.remove('diensten', x.id);
-          if (verstuurd && x.medewerker_id) await A.melding(x.medewerker_id, `↩ De indeling van ${ev0.naam} (${A.datumLang(ev0.datum)}) is teruggedraaid. Je dienst staat nog niet vast; de uitvraag loopt weer t/m ${A.datumLang(tot)}. Je reactie blijft staan.`);
+          if (verstuurd && x.medewerker_id) await A.melding(x.medewerker_id, `↩ De indeling van ${ev0.naam} (${A.datumLang(ev0.datum)}) is teruggedraaid. Je dienst staat nog niet vast; de oproep loopt weer t/m ${A.datumLang(tot)}. Je reactie blijft staan.`);
         }
         await Store.update('zalen_events', ev0.id, { status: 'open', uitvraag: true, uitvraag_tot: tot, herinnerd: false });
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
-        A.toast(ev0.naam + ': uitvraag staat weer open', 'ok');
+        A.toast(ev0.naam + ': oproep staat weer open', 'ok');
       });
       const np = bg.querySelector('#eNuPlannen');
       if (np) np.onclick = () => A.bezig(np, async () => {
         const st = uitvraagStand(e);
-        if (st.geen && !await A.bevestig('Nu inplannen?', `${st.geen} oproepkracht(en) hebben nog niet gereageerd. Toch nu inplannen?`, 'Nu inplannen')) return;
+        if (st.geen && !await A.bevestig('Nu indelen?', `${st.geen} oproepkracht(en) hebben nog niet gereageerd. Toch nu indelen?`, 'Nu indelen')) return;
         await A.verwerkUitvragen([e.id]);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw();
         A.toast(e.naam + (A.data.instellingen.auto_publiceren ? ' is ingepland en verstuurd' : ' is ingepland – controleer en verstuur'), 'ok');
@@ -1423,8 +1618,13 @@
     if (res === 'weg') {
       if (!await A.bevestig('Feest verwijderen', 'Het feest en ' + oudeDiensten.length + ' bijbehorende dienst(en) worden verwijderd.', 'Verwijderen')) return;
       for (const x of oudeDiensten) { await Store.remove('diensten', x.id); await meldVoorEvent(ev, x.medewerker_id, `Je dienst op ${A.datumLang(x.datum)} (${ev.naam}) is vervallen.`); }
-      for (const r of A.data.event_reacties.filter(r => r.event_id === e.id)) await Store.remove('event_reacties', r.id);
-      await Store.remove('zalen_events', e.id);
+      const reacties = A.data.event_reacties.filter(r => r.event_id === e.id);
+      // Waren er reacties? Dan het feest als 'geannuleerd' bewaren, zodat de reactiestatistiek per medewerker klopt
+      if (reacties.length) {
+        for (const r of reacties.filter(r => r.bevestigd_functie || r.aangeboden)) await Store.update('event_reacties', r.id, { bevestigd_functie: null, aangeboden: false, overname_door: null });
+        for (const r of reacties.filter(r => r.kan && ev.status === 'open')) await A.melding(r.medewerker_id, `❌ ${ev.naam} op ${A.datumLang(ev.datum)} gaat niet door. Je hoeft niet te komen.`);
+        await Store.update('zalen_events', e.id, { status: 'geannuleerd', uitvraag_gevraagd: ev.uitvraag_gevraagd && ev.uitvraag_gevraagd.length ? ev.uitvraag_gevraagd : G.uitvraagGroep(ev, A.data).map(m => m.id) });
+      } else await Store.remove('zalen_events', e.id);
       await herlaad(); opnieuw(); A.toast('Feest verwijderd'); return;
     }
     // baas werkt zelf mee: zorg dat hij als (niet-actieve) medewerker bestaat
@@ -1432,7 +1632,7 @@
     if (baasFns.length) await zorgBeheerMw(baasFns);
     // Nieuwe uitvraag starten?
     const startUitvraag = res.uitvraag && (nieuw || !ev.uitvraag || !ev.status) && !['ingepland', 'concept'].includes(res.status);
-    if (startUitvraag) { res.status = 'open'; res.herinnerd = false; }
+    if (startUitvraag) { res.status = 'open'; res.herinnerd = false; res.uitvraag_start = new Date().toISOString(); res.uitvraag_gevraagd = G.uitvraagGroep(res, A.data).map(m => m.id); }
     if (!res.uitvraag && res.status === 'open') res.status = null;
     const { id, ...patch } = res;
     if (nieuw) await Store.insert('zalen_events', res); else await Store.update('zalen_events', e.id, patch);
@@ -1586,25 +1786,28 @@
   //  PERSONEEL
   // =====================================================================
   function pPersoneel() {
+    const sub = (location.hash.split('/')[1]) || '';
+    if (sub) return pMedewerker(decodeURIComponent(sub));
     const alle = A.data.medewerkers.slice().sort((a, b) => (b.actief !== false) - (a.actief !== false) || a.naam.localeCompare(b.naam));
     const maand = G.monthOf(G.today());
     hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
-      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th></th></tr></thead><tbody>
+      <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th>Beeld</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
         <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
-        <td>${(m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}</td>
+        <td>${(m.eigen_functies || m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}${afgeleid(m).length ? ` <small class="zacht" title="Volgt uit Instellingen → Functies">+ ${afgeleid(m).map(esc).join(', ')}</small>` : ''}</td>
         <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>
         <td>${(m.vaste_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
         <td>${(m.vrije_dagen || []).map(i => A.DAG_KORT[i]).join(', ') || '–'}</td>
         <td>${A.uren(urenVan(m.id, maand))} u</td>
+        <td>${m.actief !== false ? (() => { const st = personeelStats(m); return oordeelLabel(st) + (st.let.length ? `<br><small class="zacht">${esc(st.let[0])}</small>` : ''); })() : ''}</td>
         <td>${m.actief !== false ? `<button class="knop klein" type="button" data-uitnodig="${m.id}">📲 Uitnodigen</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>${alle.length ? '' : '<div class="leeg"><span class="groot">👥</span>Nog geen personeel. Voeg je eerste medewerker toe.</div>'}</div>`;
     $('#nieuwMw').onclick = () => mwModal(null);
     $('#mwBericht').onclick = () => berichtAanPersoneel();
     $('#mwPoster').onclick = () => posterPrinten();
     hoofd.querySelectorAll('[data-uitnodig]').forEach(b => b.onclick = e => { e.stopPropagation(); uitnodigen(A.mw(b.dataset.uitnodig)); });
-    hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => mwModal(A.mw(r.dataset.mw)));
+    hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => { const m = A.mw(r.dataset.mw); if (m.actief === false) mwModal(m); else location.hash = 'personeel/' + m.id; });
   }
 
 
@@ -1732,7 +1935,7 @@
     const html = `
       <div class="rij"><div class="veld"><label>Naam</label><input id="mNaam" value="${esc(m.naam)}"></div><div class="veld"><label>Inlogcode (PIN)</label><input id="mPin" value="${esc(m.pin)}" inputmode="numeric" maxlength="6"></div></div>
       <div class="rij"><div class="veld"><label>Telefoon</label><input id="mTel" value="${esc(m.telefoon || '')}"></div><div class="veld"><label>E-mail</label><input id="mMail" value="${esc(m.email || '')}"></div></div>
-      <div class="veld"><label>Functies</label>${chips('fn', (A.data.instellingen.functies || []).map(f => [f, f]), m.functies)}</div>
+      <div class="veld"><label>Functies</label>${chips('fn', (A.data.instellingen.functies || []).map(f => [f, f]), m.eigen_functies || m.functies)}<small class="zacht" id="mFnOok" style="display:block;margin-top:.3em"></small></div>
       <div class="veld"><label>Werkt in</label>${chips('loc', [['cafetaria', 'Cafetaria'], ['zalen', 'Zalencentrum']], m.locaties)}</div>
       <div class="rij"><div class="veld"><label>Contracturen per week <small>(0 = oproepkracht)</small></label><input type="number" min="0" step="0.5" id="mUren" value="${esc(m.contracturen)}"></div>
         <div class="veld"><label>Max. dagen per week</label><input type="number" min="1" max="7" id="mMax" value="${esc(m.max_dagen_week || 5)}"></div></div>
@@ -1759,7 +1962,12 @@
         return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), liever_niet_dagen: val('liever').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, notitie: bg.querySelector('#mNot').value };
       }
     });
-    const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen);
+    const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen, bg => {
+      // laten zien wat iemand daardoor óók kan (Instellingen → Functies)
+      const toon = () => { const aan = [...bg.querySelectorAll('input[name=fn]:checked')].map(i => i.value), ook = G.metAfgeleid(aan, G.functieOok(A.data)).filter(f => !aan.includes(f));
+        bg.querySelector('#mFnOok').innerHTML = ook.length ? `Kan daardoor ook: <b>${ook.map(esc).join(', ')}</b> <span>(zie Instellingen → Functies)</span>` : ''; };
+      bg.querySelectorAll('input[name=fn]').forEach(i => i.addEventListener('change', toon)); toon();
+    });
     if (!res) return;
     if (res === 'uitnodigen') return uitnodigen(m);
     if (res === 'weg') {
@@ -1780,7 +1988,7 @@
           for (const x of toekomst) await Store.update('diensten', x.id, { medewerker_id: null });
       }
     }
-    await herlaad(); pPersoneel();
+    await herlaad(); if (res === 'weg' && location.hash.startsWith('#personeel/')) location.hash = 'personeel'; else pPersoneel();
   }
 
   // =====================================================================
@@ -1887,7 +2095,7 @@
   function plannerPaneel(s) {
     const P = G.plannerInst({ instellingen: s });
     const sel = (k, w) => `<select data-gewicht="${k}">${GEWICHT_OPTIES.map(([v, l]) => `<option value="${v}" ${+w === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
-    return `<div class="paneel"><h3>🧠 Slim plannen</h3>
+    return `<div class="paneel" style="box-shadow:none;border:1px solid var(--lijn)"><h3>🧠 Slim plannen</h3>
       <p class="zacht" style="font-size:.9rem">De planner probeert duizenden roosters en kiest het rooster dat het best scoort op de punten hieronder.
         Wat nooit mag (verkeerde functie, vrij, ziek, "kan niet", al aan het werk, max. dagen per week) gebeurt nooit, wat je hier ook kiest.</p>
       <div class="rij"><div class="veld"><label>Liefst niet meer dan … dagen achter elkaar</label><input type="number" min="2" max="14" id="iReeks" value="${esc(P.max_achter_elkaar)}"></div>
@@ -1911,30 +2119,37 @@
       </div>
       <div class="paneel"><h3>Functies</h3><p class="zacht">De taken die mensen kunnen doen.</p>
         <div class="chips" id="iFuncties">${(s.functies || []).map(f => `<span class="label" style="font-size:.88rem;padding:.35em .5em .35em .8em">${esc(f)} <button class="icoon" data-fweg="${esc(f)}" style="font-size:.8rem;padding:0 .3em">✕</button></span>`).join('')}</div>
-        <div style="display:flex;gap:.5em;margin-top:.8em;max-width:360px"><input id="iNieuwFn" placeholder="Nieuwe functie, bv. Gastvrouw"><button class="knop" id="iFnToev">Toevoegen</button></div></div>
+        <div style="display:flex;gap:.5em;margin-top:.8em;max-width:360px"><input id="iNieuwFn" placeholder="Nieuwe functie, bv. Gastvrouw"><button class="knop" id="iFnToev">Toevoegen</button></div>
+        ${(s.functies || []).length > 1 ? `<h4 style="margin:1.2em 0 .2em">Wie dit kan, kan ook…</h4>
+        <p class="zacht" style="font-size:.88rem;margin:0 0 .6em">Bijvoorbeeld: wie <b>Bar zaal</b> kan, kan ook <b>Bar boven</b>. Dan hoef je dat niet bij iedere medewerker apart aan te vinken. De planner, de oproepen en het oppakken van open diensten nemen het vanzelf mee. Tik op een functie om hem aan of uit te zetten.</p>
+        <div class="fn-ook">${(s.functies || []).map(f => { const ook = G.functieOok(A.data)[f] || [];
+          return `<div class="fn-ook-rij"><b>${esc(f)}</b><span class="zacht">→ kan ook:</span><div class="chips">${(s.functies || []).filter(x => x !== f).map(x => `<label class="chip-keuze"><input type="checkbox" data-ookvan="${esc(f)}" value="${esc(x)}" ${ook.includes(x) ? 'checked' : ''}><span>${esc(x)}</span></label>`).join('')}</div></div>`; }).join('')}</div>` : ''}</div>
       <div class="paneel"><h3>Automatisch rooster</h3>
-        <div class="rij"><div class="veld"><label>Nieuw rooster maken … dagen voor het einde van de maand</label><input type="number" min="1" max="28" id="iDagen" value="${esc(s.dagen_voor_einde)}"></div>
-          <div class="veld"><label>Personeel kan tot dag … van de maand doorgeven wanneer ze volgende maand niet kunnen</label><input type="number" min="1" max="31" id="iSlot" value="${esc(s.beschikbaarheid_slot || 25)}"></div></div>
+        <div class="rij"><div class="veld"><label>Nieuw rooster maken … dagen voor het einde van de maand</label><input type="number" min="1" max="28" id="iDagen" value="${esc(s.dagen_voor_einde)}"></div></div>
         <div class="rij"><div class="veld"><label>Oproepkrachten krijgen … dagen om te reageren op nieuwe feesten</label><input type="number" min="1" max="30" id="iUitvraag" value="${esc(s.uitvraag_dagen || 7)}"></div>
           <div class="veld"></div></div>
-        <h4 style="margin:.6em 0 .3em">Cafetaria in stappen <small class="zacht">(aantal dagen vóór het definitieve rooster)</small></h4>
+        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
+        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
+        <label class="check"><input type="checkbox" id="iFeestRuil" ${s.feest_ruil_goedkeuring ? 'checked' : ''}> Overnemen van een bevestigde feestplek (nog vóór het inplannen) eerst laten goedkeuren door beheer</label>
+        <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+      <details class="paneel geavanceerd"><summary><b>⚙️ Geavanceerd</b> <small class="zacht">rekenregels van de planner – meestal hoef je hier niets te veranderen</small></summary>
+        <div class="paneel" style="box-shadow:none;border:1px solid var(--lijn)"><h3>Cafetaria in stappen</h3>
+        <p class="zacht" style="margin-top:-.3em">Aantal dagen vóór het rooster klaar is.</p>
         <div class="rij">
           <div class="veld"><label>1. Voorlopig rooster vaste krachten</label><input type="number" min="1" max="40" id="iCafR1" value="${esc(s.caf_ronde1_dagen != null && s.caf_ronde1_dagen !== '' ? s.caf_ronde1_dagen : 21)}"></div>
           <div class="veld"><label>2. Extra's toekennen, rest naar oproepkrachten <small>(0 = stappen uit)</small></label><input type="number" min="0" max="28" id="iCafDagen" value="${esc(Uitvraag.cafDagen({ instellingen: s }))}"></div>
           <div class="veld"><label>3. Oproepkrachten inplannen + herinnering</label><input type="number" min="0" max="14" id="iCafR3" value="${esc(s.caf_ronde3_dagen != null && s.caf_ronde3_dagen !== '' ? s.caf_ronde3_dagen : 2)}"></div></div>
         <p class="zacht" style="font-size:.85rem;margin-top:-.2em">Stap 1: mensen met contracturen of vaste werkdagen worden ingepland en zien hun diensten (grijs); bij Beschikbaar kunnen ze extra diensten kiezen. Stap 2: die extra's worden toegekend en de open diensten gaan ook naar de oproepkrachten met cafetaria. Stap 3: oproepkrachten die "Ik kan" zeiden worden ingepland en iedereen krijgt een herinnering voor wat nog open is. De reacties van de laatste dagen (na de herinnering) worden op de dag van het nieuwe rooster verdeeld; vaste krachten en oproepkrachten tellen dan gelijk.</p>
-        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iAuto" ${s.auto_publiceren ? 'checked' : ''}> Automatisch gemaakt rooster meteen versturen naar personeel (anders eerst zelf controleren)</label>
-        <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
-        <label class="check"><input type="checkbox" id="iFeestRuil" ${s.feest_ruil_goedkeuring ? 'checked' : ''}> Overnemen van een bevestigde feestplek (nog vóór het inplannen) eerst laten goedkeuren door beheer</label>
-        <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+        </div>
       ${plannerPaneel(s)}
-      <div class="paneel"><h3>🎉 Standaard bezetting feesten</h3>
+      <div class="paneel" style="box-shadow:none;border:1px solid var(--lijn)"><h3>🎉 Standaard bezetting feesten</h3>
         <p class="zacht" style="font-size:.9rem">Hiermee wordt bij een nieuw feest voorgesteld hoeveel mensen er nodig zijn. Per feest kun je het daarna altijd nog aanpassen.
           Laat "1 per … gasten" op <b>0</b> staan voor een vast aantal.</p>
         <div class="regel-kop"><span>Functie</span><span>1 per … gasten</span><span>Minimaal</span><span>Maximaal</span><span></span></div>
         <div id="iRegels">${bezettingRegels().map(regelRij).join('')}</div>
         <button class="knop klein" id="iRegelToev" type="button">+ Functie</button>
         <p class="zacht" style="font-size:.88rem;margin:.8em 0 0" id="iRegelVb"></p></div>
+      </details>
       <div class="paneel" style="padding:0;border:0;background:none;box-shadow:none"><h3 style="margin:.2em 0 .6em">📲 App en meldingen op je telefoon</h3><div id="iPush"></div>
         <p class="zacht" style="font-size:.85rem;margin:.4em 0 0">Zet dit aan op elk apparaat waarop je meldingen wilt krijgen. Het personeel zet het zelf aan op hun eigen telefoon (knop op de personeelspagina en onder het belletje).</p></div>
       <div style="display:flex;gap:.5em;flex-wrap:wrap"><button class="knop primair" id="iOpslaan">Opslaan</button><button class="knop" id="iBackup">⬇ Back-up downloaden</button></div>`;
@@ -1942,26 +2157,45 @@
       const f = b.dataset.fweg;
       const gebruikt = A.data.medewerkers.filter(m => (m.functies || []).includes(f)).length + A.data.cafetaria_diensten.filter(c => c.functie === f).length;
       if (gebruikt && !await A.bevestig('Functie verwijderen', `"${f}" wordt nog gebruikt bij ${gebruikt} medewerker(s)/diensten. Toch verwijderen?`, 'Verwijderen')) return;
-      await Store.update('instellingen', 1, { functies: s.functies.filter(x => x !== f) }); await herlaad(); pInstellingen();
+      const ook = {}; for (const [k, v] of Object.entries(G.functieOok(A.data))) if (k !== f) { const w = v.filter(x => x !== f); if (w.length) ook[k] = w; }
+      const upd = { functies: s.functies.filter(x => x !== f) }; if (Object.keys(G.functieOok(A.data)).length) upd.functie_ook = ook;
+      await Store.update('instellingen', 1, upd); await herlaad(); pInstellingen();
     });
+    // "wie X kan, kan ook Y" meteen opslaan
+    hoofd.querySelectorAll('[data-ookvan]').forEach(i => i.onchange = () => A.bezig(null, async () => {
+      const ook = {};
+      hoofd.querySelectorAll('[data-ookvan]:checked').forEach(x => (ook[x.dataset.ookvan] = ook[x.dataset.ookvan] || []).push(x.value));
+      await Store.update('instellingen', 1, { functie_ook: ook });
+      if (Store.ontbrekend.has('instellingen.functie_ook')) { A.toast('Nog niet opgeslagen: laat eerst beveiliging.sql uitvoeren in Supabase', 'fout'); i.checked = !i.checked; return; }
+      await herlaad();
+      const n = A.data.medewerkers.filter(m => m.actief !== false && (m.functies || []).includes(i.value) && !(m.eigen_functies || []).includes(i.value)).length;
+      A.toast(i.checked ? `Opgeslagen: wie ${i.dataset.ookvan} kan, kan nu ook ${i.value}${n ? ` (${n} medewerker${n > 1 ? 's' : ''})` : ''}` : `Opgeslagen: ${i.dataset.ookvan} telt niet meer als ${i.value}`, 'ok');
+    }));
     $('#iFnToev').onclick = async () => {
       const f = $('#iNieuwFn').value.trim(); if (!f || s.functies.includes(f)) return;
       await Store.update('instellingen', 1, { functies: [...s.functies, f] }); await herlaad(); pInstellingen();
     };
     $('#iOpslaan').onclick = e => A.bezig(e.target, async () => {
       if (!$('#iPin').value.trim()) return A.toast('Beheercode mag niet leeg zijn', 'fout');
-      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, beschikbaarheid_slot: +$('#iSlot').value || 25, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, feest_ruil_goedkeuring: $('#iFeestRuil').checked, caf_uitvraag_dagen: $('#iCafDagen').value === '' ? 14 : +$('#iCafDagen').value, caf_ronde1_dagen: +$('#iCafR1').value || 21, caf_ronde3_dagen: $('#iCafR3').value === '' ? 2 : +$('#iCafR3').value, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
+      const wijz = { bedrijfsnaam: $('#iNaam').value, admin_pin: $('#iPin').value.trim(), site_url: $('#iUrl').value.trim(), dagen_voor_einde: +$('#iDagen').value || 21, auto_publiceren: $('#iAuto').checked, ruil_goedkeuring: $('#iRuil').checked, feest_ruil_goedkeuring: $('#iFeestRuil').checked, caf_uitvraag_dagen: $('#iCafDagen').value === '' ? 14 : +$('#iCafDagen').value, caf_ronde1_dagen: +$('#iCafR1').value || 21, caf_ronde3_dagen: $('#iCafR3').value === '' ? 2 : +$('#iCafR3').value, bezetting_regels: leesRegels(), uitvraag_dagen: +$('#iUitvraag').value || 7, beheer_naam: $('#iBNaam').value.trim(), beheer_telefoon: $('#iBTel').value.trim(), planner: leesPlanner() };
       // Kolommen die nog niet in Supabase bestaan overslaan, met uitleg welk SQL-bestand nodig is
       const nodig = { bezetting_regels: ['de standaard bezetting', 'bezetting.sql'], planner: ['slim plannen', '4-planner.sql'], feest_ruil_goedkeuring: ['goedkeuren van feestplekken', 'ruilen-feest.sql'], caf_uitvraag_dagen: ['het voorlopige cafetariarooster', 'cafetaria-ronde.sql'], caf_ronde1_dagen: ['de cafetaria-stappen', 'cafetaria-ronde.sql'], caf_ronde3_dagen: ['de cafetaria-stappen', 'cafetaria-ronde.sql'] };
       const gemist = [];
       for (let poging = 0; ; poging++) {
-        try { await Store.update('instellingen', 1, wijz); break; }
+        try {
+          await Store.update('instellingen', 1, wijz);
+          // nieuwe beheercode meteen gebruiken voor deze sessie
+          if (veilig && wijz.admin_pin) { Store.zetAuth({ rol: 'beheer', pin: wijz.admin_pin }); sessionStorage.setItem('rooster_admin_pin', wijz.admin_pin); }
+          break;
+        }
         catch (x) {
           const k = Object.keys(nodig).find(k => k in wijz && new RegExp(k).test(x.message));
           if (!k || poging > 3) throw x;
           delete wijz[k]; gemist.push(nodig[k]);
         }
       }
+      const misKol = [...Store.ontbrekend].filter(x => x.startsWith('instellingen.')).map(x => x.slice(13));
+      if (misKol.length && !gemist.length) A.toast('Bijna alles opgeslagen. Laat beveiliging.sql uitvoeren in Supabase om ook ' + misKol.join(', ') + ' te bewaren', 'fout');
       if (gemist.length) A.toast('Opgeslagen, behalve ' + gemist.map(g => g[0]).join(' en ') + ': voer eerst ' + gemist.map(g => g[1]).join(' en ') + ' uit in Supabase', 'fout');
       await herlaad(); $('#bedrijfsnaam').textContent = A.data.instellingen.bedrijfsnaam; A.toast('Instellingen opgeslagen', 'ok'); pInstellingen();
     });

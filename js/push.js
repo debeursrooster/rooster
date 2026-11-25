@@ -73,7 +73,11 @@
     let sub = await reg.pushManager.getSubscription();
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: sleutel(cfg.VAPID_PUBLIC_KEY) });
     const j = sub.toJSON();
-    await rpc('push_aanmelden', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_rol: rol, p_medewerker: medewerkerId || null });
+    const args = { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_rol: rol, p_medewerker: medewerkerId || null };
+    // Sinds beveiliging.sql controleert de database ook hier de code; vóór die update bestaat p_pin nog niet
+    const pin = rol === 'beheer' ? sessionStorage.getItem('rooster_admin_pin') : localStorage.getItem('rooster_pin');
+    try { await rpc('push_aanmelden', pin ? { ...args, p_pin: pin } : args); }
+    catch (e) { if (pin && /PGRST202|\(404\)/.test(e.message)) await rpc('push_aanmelden', args); else throw e; }
     localStorage.setItem('push_' + rol, 'aan');
     localStorage.removeItem('push_uit_' + rol);
   };

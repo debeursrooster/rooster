@@ -6,14 +6,28 @@
   const $ = s => document.querySelector(s);
   let ik = null, tab = 'mijn', weekStart = G.weekStart(G.today()), roosterLoc = 'alle', gekozenMw = null, roosterView = 'maand', roosterDag = G.today();
 
+  // Veilige modus (supabase/beveiliging.sql): de app krijgt pas gegevens na het inloggen,
+  // en alleen wat de medewerker mag zien. Code wordt op de server gecontroleerd.
+  let veilig = false, publiek = null;
+  const geenVerbinding = e => { document.body.innerHTML = `<div class="login"><div class="login-kaart"><h2>Even geen verbinding</h2><p class="zacht">${esc(e.message)}</p><button class="knop primair" onclick="location.reload()">Opnieuw proberen</button></div></div>`; };
   async function start() {
-    try { await A.reload(); }
-    catch (e) { document.body.innerHTML = `<div class="login"><div class="login-kaart"><h2>Even geen verbinding</h2><p class="zacht">${esc(e.message)}</p><button class="knop primair" onclick="location.reload()">Opnieuw proberen</button></div></div>`; return; }
+    try {
+      veilig = await Store.isVeilig();
+      if (veilig) {
+        publiek = await Store.publiek();
+        const id = localStorage.getItem('rooster_mw'), pin = localStorage.getItem('rooster_pin');
+        if (id && pin) {
+          Store.zetAuth({ rol: 'personeel', id, pin });
+          try { await A.reload(); }
+          catch (e) { if (!e.auth) throw e; localStorage.removeItem('rooster_pin'); Store.zetAuth(null); }
+        }
+      } else await A.reload();
+    } catch (e) { return geenVerbinding(e); }
     if (Store.modus === 'demo') $('#demoBand').classList.remove('verborgen');
-    const bedrijf = A.data.instellingen.bedrijfsnaam || 'Rooster';
+    const bedrijf = (A.data && A.data.instellingen.bedrijfsnaam) || (publiek && publiek.bedrijfsnaam) || 'Rooster';
     $('#loginBedrijf').textContent = bedrijf; $('#kopBedrijf').textContent = bedrijf;
     const id = localStorage.getItem('rooster_mw');
-    ik = id && A.mw(id);
+    ik = id && A.data && A.mw(id);
     if (ik && ik.actief !== false) return toonApp();
     toonLogin();
   }
@@ -21,28 +35,39 @@
   // ---------------- inloggen ----------------
   function toonLogin() {
     $('#login').classList.remove('verborgen'); $('#app').classList.add('verborgen');
-    const mws = A.data.medewerkers.filter(m => m.actief !== false).sort((a, b) => a.naam.localeCompare(b.naam));
+    const mws = (veilig ? publiek.medewerkers : A.data.medewerkers.filter(m => m.actief !== false)).slice().sort((a, b) => a.naam.localeCompare(b.naam));
     $('#namen').innerHTML = mws.map(m => `<button data-id="${m.id}"><span class="avatar" style="background:${esc(m.kleur)}">${esc(m.naam[0])}</span>${esc(m.naam)}</button>`).join('') || '<p class="zacht">Er staat nog geen personeel in het systeem.</p>';
     $('#namen').querySelectorAll('button').forEach(b => b.onclick = () => {
-      gekozenMw = A.mw(b.dataset.id);
+      gekozenMw = mws.find(m => m.id === b.dataset.id);
       $('#pinNaam').textContent = gekozenMw.naam;
       $('#stapNaam').classList.add('verborgen'); $('#stapPin').classList.remove('verborgen');
       $('#pin').value = ''; $('#pin').focus();
     });
-    // Persoonlijke uitnodigingslink (…?m=<id>): naam staat al klaar
-    const uitn = new URLSearchParams(location.search).get('m');
+    // Persoonlijke uitnodigingslink (…?m=<id>), of eerder ingelogd: naam staat al klaar
+    const uitn = new URLSearchParams(location.search).get('m') || localStorage.getItem('rooster_mw');
     const knop = uitn && $('#namen').querySelector(`button[data-id="${CSS.escape(uitn)}"]`);
     if (knop) knop.click();
   }
   $('#terugNaam').onclick = e => { e.preventDefault(); $('#stapPin').classList.add('verborgen'); $('#stapNaam').classList.remove('verborgen'); };
-  $('#stapPin').onsubmit = e => {
+  $('#stapPin').onsubmit = async e => {
     e.preventDefault();
-    if ($('#pin').value === String(gekozenMw.pin)) {
-      ik = gekozenMw; localStorage.setItem('rooster_mw', ik.id);
-      $('#login').classList.add('verborgen'); toonApp();
-    } else { A.toast('Code klopt niet', 'fout'); $('#pin').value = ''; }
+    const pin = $('#pin').value, knop = $('#stapPin button');
+    let goed;
+    try {
+      knop.disabled = true;
+      const auth = { rol: 'personeel', id: gekozenMw.id, pin };
+      goed = await Store.login(auth);
+      if (goed === null) goed = pin === String(gekozenMw.pin);   // oude modus / demo: zelf controleren
+      if (goed) {
+        if (veilig) { localStorage.setItem('rooster_pin', pin); await A.reload(); }
+        ik = A.mw(gekozenMw.id); localStorage.setItem('rooster_mw', ik.id);
+        $('#login').classList.add('verborgen'); return toonApp();
+      }
+    } catch (x) { A.toast(x.message || 'Inloggen lukte niet', 'fout'); $('#pin').value = ''; return; }
+    finally { knop.disabled = false; }
+    A.toast('Code klopt niet', 'fout'); $('#pin').value = '';
   };
-  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat? Zolang je uitgelogd bent, krijg je hier geen meldingen. Log je weer in, dan gaan ze vanzelf weer aan.', 'Uitloggen')) { await Push.uitzetten('personeel'); localStorage.removeItem('rooster_mw'); location.reload(); } };
+  $('#uitKnop').onclick = async () => { if (await A.bevestig('Uitloggen', 'Wil je uitloggen op dit apparaat? Zolang je uitgelogd bent, krijg je hier geen meldingen. Log je weer in, dan gaan ze vanzelf weer aan.', 'Uitloggen')) { await Push.uitzetten('personeel'); localStorage.removeItem('rooster_mw'); localStorage.removeItem('rooster_pin'); location.reload(); } };
 
   // ---------------- app & pushmeldingen ----------------
   const testPush = () => A.melding(ik.id, '🔔 Meldingen staan aan! Je krijgt hier voortaan bericht over je rooster, ruilverzoeken en feesten.', { titel: 'Meldingen werken' });
@@ -65,7 +90,10 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) ververs(); });
     setInterval(() => { if (!document.hidden && !document.querySelector('.modal-bg')) ververs(); }, 60000);
   }
-  async function ververs() { try { await A.reload(); ik = A.mw(ik.id); if (!ik || ik.actief === false) { localStorage.removeItem('rooster_mw'); return location.reload(); } teken(); } catch (e) { } }
+  async function ververs() {
+    try { await A.reload(); ik = A.mw(ik.id); if (!ik || ik.actief === false) { localStorage.removeItem('rooster_mw'); return location.reload(); } teken(); }
+    catch (e) { if (e.auth) { localStorage.removeItem('rooster_pin'); location.reload(); } }   // code gewijzigd: opnieuw inloggen
+  }
 
   const zichtbaar = d => A.dienstZichtbaar(d);
   // Lopende uitvragen waar ik op mag reageren
@@ -139,6 +167,13 @@
     $('#volgendeDienst').innerHTML = v ? `<div class="volgende"><div class="datumblok ${v.locatie}" style="background:rgba(255,255,255,.95)"><b>${G.parse(v.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(v.datum)]}</small></div>
       <div><small style="color:#bfb3a2">Volgende dienst${v.datum === nu ? ' – vandaag!' : v.datum === G.addDays(nu, 1) ? ' – morgen' : ''}</small><div class="groot">${tijd(v)}</div><div style="color:#d8cebf;font-size:.88rem">${A.LOC[v.locatie]} · ${esc(v.functie)}${v.event_id && A.event(v.event_id) ? ' · ' + esc(A.event(v.event_id).naam) : ''}</div></div></div>`
       : `<div class="volgende"><div>Je hebt nog geen diensten ingepland.</div></div>`;
+    // Ziek melden altijd in één tik bereikbaar (staat ook onder Vrij / ziek)
+    const zk = mijnZiek();
+    $('#volgendeDienst').insertAdjacentHTML('beforeend', zk
+      ? `<div class="ziek-kop">🤒 Je bent ziek gemeld${zk.status === 'gemeld' ? ' (nog niet bevestigd)' : ''} <button class="knop klein ok" type="button" id="kopBeter">Ik ben weer beter</button></div>`
+      : `<button class="knop ziek-knop" type="button" id="kopZiek">🤒 Ziek melden</button>`);
+    const kz = $('#kopZiek'); if (kz) kz.onclick = ziekMelden;
+    const kb = $('#kopBeter'); if (kb) kb.onclick = beterMelden;
     const maand = G.monthOf(nu);
     const uren = mijn.filter(d => d.maand === maand).reduce((s, d) => s + G.hours(d.start, d.eind), 0);
     const doel = G.doelUren(ik, maand);
@@ -357,7 +392,7 @@
       if ((mijnReactie(ev) || {}).bevestigd_functie) { A.toast('Je bent al bevestigd. Neem contact op met ' + beheerNaam() + ' als je toch niet kunt.', 'fout'); return ververs(); }
       const bestaand = mijnReactie(ev);
       if (bestaand) await Store.update('event_reacties', bestaand.id, { kan, tijd: new Date().toISOString() });
-      else await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: new Date().toISOString() });
+      else { const t = new Date().toISOString(); await Store.insert('event_reacties', { event_id: ev.id, medewerker_id: ik.id, kan, opmerking: '', tijd: t, eerste_tijd: t }); }
       await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
       } catch (x) { A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
     }
@@ -373,7 +408,7 @@
         for (const id of ids) {
           const bestaand = A.data.event_reacties.find(x => x.dienst_id === id && x.medewerker_id === ik.id);
           if (bestaand) { if (bestaand.kan !== kan) await Store.update('event_reacties', bestaand.id, { kan, tijd: tijdNu }); }
-          else await Store.insert('event_reacties', { event_id: null, dienst_id: id, medewerker_id: ik.id, kan, opmerking: '', tijd: tijdNu });
+          else await Store.insert('event_reacties', { event_id: null, dienst_id: id, medewerker_id: ik.id, kan, opmerking: '', tijd: tijdNu, eerste_tijd: tijdNu });
         }
         await ververs(); A.toast(kan ? 'Genoteerd: je kunt' : 'Genoteerd: je kunt niet', 'ok');
       } catch (x) { console.error(x); A.toast('Opslaan lukte niet, probeer het opnieuw', 'fout'); ververs(); }
@@ -481,12 +516,12 @@
       const nu = A.data.diensten.find(x => x.id === d.id);
       if (!nu || !oppakbaar(nu)) { A.toast('Deze dienst is al door iemand opgepakt', 'fout'); return ververs(); }
       const vanBaas = !!nu.medewerker_id;
-      await Store.update('diensten', d.id, { medewerker_id: ik.id });
+      await Store.update('diensten', d.id, { medewerker_id: ik.id, opgepakt_door: ik.id, opgepakt_op: new Date().toISOString() });
       if (evConcept(nu)) {
         // nog niet verstuurd: als 'Ik kan' vastleggen, zodat hij grijs bij Mijn diensten staat tot het verstuurd is
         const e = A.event(nu.event_id), r = mijnReactie(e), tijd = new Date().toISOString();
         if (r) await Store.update('event_reacties', r.id, { kan: true, tijd });
-        else await Store.insert('event_reacties', { event_id: e.id, medewerker_id: ik.id, kan: true, opmerking: '', tijd, bevestigd_functie: null, aangeboden: false });
+        else await Store.insert('event_reacties', { event_id: e.id, medewerker_id: ik.id, kan: true, opmerking: '', tijd, eerste_tijd: tijd, bevestigd_functie: null, aangeboden: false });
       }
       await A.melding(null, `${ik.naam} heeft de ${vanBaas ? 'plek van ' + A.mwNaam(nu.medewerker_id) : 'open dienst'} van ${A.datumLang(d.datum)} ${d.start}–${d.eind} (${d.functie}) opgepakt.`);
       await ververs(); A.toast('Top, je staat erop!', 'ok');

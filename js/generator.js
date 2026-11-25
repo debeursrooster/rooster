@@ -59,7 +59,7 @@
     }
     if (opties.zalen !== false) {
       // Feesten met een lopende uitvraag ('open') of al vastgezet ('ingepland') worden hier overgeslagen
-      const events = (data.zalen_events || []).filter(e => G.monthOf(e.datum) === maand && (!opties.eventId || e.id === opties.eventId) && (opties.eventId || !G.eventVast(e)));
+      const events = (data.zalen_events || []).filter(e => e.status !== 'geannuleerd' && G.monthOf(e.datum) === maand && (!opties.eventId || e.id === opties.eventId) && (opties.eventId || !G.eventVast(e)));
       for (const e of events) slots.push(...G.eventSlots(e));
     }
     return slots;
@@ -96,6 +96,24 @@
   // Mag het personeel een plek van de baas overnemen? (per functie in te stellen bij het feest; standaard ja)
   G.baasOverneembaar = (d, e) => !(e && (e.bezetting || []).some(b => b.functie === d.functie && b.baas_overname === false));
   G.eventVast = e => !!e && ['open', 'concept', 'ingepland'].includes(e.status);
+  // "Wie X kan, kan ook Y" (Instellingen → Functies). Vult bij het laden de functies van iedereen aan,
+  // zodat de planner, oproepen en het oppakken van diensten het vanzelf meenemen.
+  // Wat bij de medewerker zelf is aangevinkt, blijft bewaard in m.eigen_functies (wordt niet opgeslagen).
+  G.functieOok = data => { const o = (data && data.instellingen && data.instellingen.functie_ook) || {}; return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; };
+  G.metAfgeleid = (fns, ook) => {
+    const uit = [...(fns || [])];
+    for (let i = 0; i < uit.length; i++) for (const f of (ook[uit[i]] || [])) if (!uit.includes(f)) uit.push(f);
+    return uit;
+  };
+  G.pasFunctiesToe = function (data) {
+    const ook = G.functieOok(data);
+    for (const m of (data.medewerkers || [])) {
+      const eigen = m.eigen_functies || (m.functies || []).slice();
+      Object.defineProperty(m, 'eigen_functies', { value: eigen, enumerable: false, configurable: true, writable: true });
+      m.functies = G.metAfgeleid(eigen, ook);
+    }
+    return data;
+  };
   G.isOproep = m => !(+m.contracturen > 0);
   // Cafetaria: wie geen contracturen én geen vaste werkdagen heeft, kiest zelf uit de open diensten (uitvraag)
   G.isCafOproep = m => !(+m.contracturen > 0) && !((m.vaste_dagen || []).length);
