@@ -46,6 +46,8 @@
       if (!info) return;
       if (info.versie) balk.querySelector(".titel").textContent = "Nieuwe versie beschikbaar (" + info.versie + ")";
       if (info.nieuw) balk.querySelector(".nieuw").textContent = info.nieuw;
+      // Verplichte update (bv. na een wijziging in de database): geen "Later"
+      if (info.verplicht) { const l = balk.querySelector(".later"); if (l) l.remove(); balk.querySelector(".titel").textContent = "Nieuwe versie – even bijwerken" + (info.versie ? " (" + info.versie + ")" : ""); }
     }).catch(() => {});
 
     balk.querySelector(".bijwerken").addEventListener("click", async () => {

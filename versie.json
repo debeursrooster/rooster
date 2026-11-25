@@ -1,4 +1,5 @@
 {
-  "versie": "1.8",
-  "nieuw": "Vooraf indelen: per functie gewoon 'Nee' of 'Ik doe deze'."
+  "versie": "1.9",
+  "verplicht": true,
+  "nieuw": "Veiliger inloggen, ziek melden bovenaan, takenlijst, personeelskaart en functies die bij elkaar horen."
 }

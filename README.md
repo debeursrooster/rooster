@@ -4,8 +4,8 @@ Een webapp waarmee de eigenaar roosters maakt, en waarmee het personeel het roos
 
 | Pagina | Voor wie | Wat |
 |---|---|---|
-| `index.html` | Personeel | Inloggen met naam en PIN, eigen diensten, weekrooster, vrij vragen, doorgeven wanneer je niet kunt, ruilen, open diensten oppakken, diensten in je telefoonagenda zetten |
-| `beheer.html` | Eigenaar | Overzicht, rooster maken/aanpassen/publiceren, personeel, vaste cafetaria-diensten, agenda zalencentrum, aanvragen goedkeuren, prikbord, instellingen |
+| `index.html` | Personeel | Inloggen met naam en PIN, eigen diensten, rooster, vrij vragen, ziek melden, ruilen, open diensten oppakken, diensten in je telefoonagenda zetten |
+| `beheer.html` | Eigenaar | Overzicht met takenlijst, rooster maken/aanpassen/versturen, personeel met een kaart per medewerker, verzuim, vaste cafetaria-diensten, agenda zalencentrum, aanvragen goedkeuren, prikbord, instellingen |
 
 ---
 
@@ -21,7 +21,7 @@ Open `beheer.html` (code **0000**) of `index.html` (bv. Sandra **1111**, Mark **
 
 ### Stap A – Database (Supabase)
 1. Maak een gratis account op https://supabase.com en een **New project** (regio: Frankfurt/EU).
-2. Ga naar **SQL Editor → New query**, plak de inhoud van `supabase/schema.sql` en klik **Run**.
+2. Ga naar **SQL Editor → New query**, plak de inhoud van `supabase/alles-in-een.sql` (uit het aparte Supabase-pakket, staat niet op GitHub) en klik **Run**.
 3. Ga naar **Project Settings → API** en noteer:
    - **Project URL** (bv. `https://abcd1234.supabase.co`)
    - de **anon public** key
@@ -70,7 +70,7 @@ Uit die mensen kiest de planner wie het **beste past**:
 Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt hij in de lijst *aandachtspunten*. Het personeel kan open diensten zelf oppakken.
 
 **Werkwijze per maand:**
-1. Personeel geeft vóór de ingestelde dag door wanneer ze niet kunnen, en vraagt vrij.
+1. Personeel vraagt op tijd vrij voor de dagen dat ze niet kunnen.
 2. Het rooster wordt automatisch gemaakt als **concept**. Dat is nog niet zichtbaar voor personeel.
 3. De eigenaar krijgt een **pushbericht op zijn telefoon** (zie *Meldingen op je telefoon*) en ziet het ook bovenaan het Overzicht. Hij kijkt het rooster na, klikt op diensten om iemand anders te kiezen (de beste kandidaten staan bovenaan) en klikt op **Versturen naar personeel**.
 4. Alleen wie is ingeroosterd krijgt een persoonlijke melding, bijvoorbeeld: *"Je bent 14× ingeroosterd (68,5 uur). Eerste dienst: donderdag 3 december."* Met één klik zet je ook een bericht in de WhatsApp-groep.
@@ -89,18 +89,27 @@ Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt
 7. Wil de eigenaar niet wachten? In het feest staat de knop **Nu inplannen**. Hij ziet daar ook per oproepkracht wat die heeft geantwoord. Op de pagina Zalencentrum staat een overzicht van hoe het werk verdeeld is.
 
 ### Diensten ruilen
-- Bij **Kan niet** kies je:
+- Een eigen dienst ruilen gaat via het tabblad **Ruilen** → *Kan je zelf een dienst niet?* (er staat bewust geen knop bij elke dienst, zodat niemand te snel afzegt). Je kiest:
   - **Iedereen die kan**: je dienst wordt aangeboden en wie hem als eerste overneemt, krijgt hem.
   - **Een collega met wie je het al hebt afgesproken**: die collega krijgt een verzoek en bevestigt met *Ja, akkoord* (of zegt nee).
 - Optioneel kies je een **dienst van die collega die jij ervoor terugneemt**. Dan is het een echte ruil en worden beide diensten omgewisseld.
 - Zijn beide collega's akkoord, dan keurt de baas het goed. Pas dan is er echt geruild. Goedkeuren door de baas kan ook uit bij Instellingen.
 
 ### Ziek melden
-1. Een medewerker tikt in de app op **🤒 Ziek melden**, vinkt aan welke diensten vervallen en kiest vanaf wanneer. Er wordt **niet** gevraagd wat iemand heeft; dat mag een werkgever niet vastleggen.
+1. Een medewerker tikt in de app op **🤒 Ziek melden**. Die knop staat bovenaan bij de volgende dienst én onder *Vrij / ziek*. Hij of zij vinkt aan welke diensten vervallen en kiest vanaf wanneer. Er wordt **niet** gevraagd wat iemand heeft; dat mag een werkgever niet vastleggen.
 2. Daarna verschijnt meteen een grote knop **📞 Bel Ricardo** met zijn nummer. Naam en nummer stel je in bij Instellingen.
 3. Ricardo krijgt een melding (en een pushbericht als ntfy is ingesteld). Bij **Aanvragen → Ziek** klikt hij op **Bevestigen** zodra de medewerker heeft gebeld. Per dienst stelt de app een vervanger voor. Kiest hij "open laten", dan krijgen collega's die kunnen een bericht om de dienst op te pakken.
 4. Wie ziek is wordt niet ingeroosterd tot hij of zij zich **beter meldt**. Dat kan de medewerker zelf doen, of Ricardo.
-5. Onder **Verzuim** staat per medewerker over de afgelopen 12 maanden: aantal meldingen, ziektedagen, gemiste diensten en hoe lang van tevoren er gemiddeld is gemeld. Er staan signalen bij, zoals *gesprek aanbevolen*, *vaak kort van tevoren* of *vaak op zondag*. Klik op een naam om de geschiedenis te zien en gesprekken en afspraken vast te leggen.
+5. Belt iemand liever? Dan zet Ricardo het er zelf in met **🤒 Iemand belde: ziek** (op het Overzicht, bij Verzuim en bij Aanvragen → Ziek). Hij vult in hoe laat er gebeld werd; dat telt mee voor "hoe kort van tevoren".
+6. Onder **Verzuim** staat per medewerker over de afgelopen 12 maanden: aantal meldingen, ziektedagen, gemiste diensten en hoe lang van tevoren er gemiddeld is gemeld. Er staan signalen bij, zoals *gesprek aanbevolen*, *vaak kort van tevoren* of *vaak op zondag*. Klik op een naam om de geschiedenis te zien en gesprekken en afspraken vast te leggen.
+
+### Functies die bij elkaar horen
+Bij **Instellingen → Functies → Wie dit kan, kan ook…** zet je bijvoorbeeld: wie *Bar zaal* kan, kan ook *Bar boven*. Dan hoef je dat niet bij iedere medewerker apart aan te vinken. De planner, de oproepen voor feesten en cafetaria, het oppakken van open diensten en het ruilen nemen het vanzelf mee. Bij de medewerker staat het grijs achter de eigen functies ("+ Bar boven"). Wat je bij de medewerker zelf aanvinkt, blijft gewoon staan. Opslaan in Supabase kan pas nadat `beveiliging.sql` (Supabase-pakket) is uitgevoerd.
+
+### Overzicht en personeelskaart
+- Het **Overzicht** begint met een **takenlijst**: wat Ricardo nu moet doen (ziekmeldingen, vrij-aanvragen, ruilen, rooster of feesten nakijken, open plekken in de komende 3 dagen). Daaronder **Nog in te vullen · komende 14 dagen**: per open plek wanneer, wie hem zou kunnen doen, of hoeveel oproepkrachten gereageerd hebben, met een knop *Invullen*.
+- Bij **Personeel** heeft iedereen een **kaart**: uren t.o.v. contract, gewerkte diensten, hoe vaak ziek (en hoe kort van tevoren), hoe vaak hij of zij reageert op oproepen en hoe snel, open diensten opgepakt, ruilen, vrije dagen. Bovenaan staat een korte samenvatting (👍 goed / ⚠️ let op). In de personeelslijst en op het Overzicht staat wie aandacht nodig heeft.
+- De reactietijd wordt bijgehouden vanaf versie 1.9. Wordt een feest verwijderd waarop al gereageerd is, dan blijft het als *geannuleerd* bewaard voor de statistiek (het personeel ziet het niet meer).
 
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
@@ -116,15 +125,28 @@ De site werkt als app (installeren) en stuurt pushmeldingen, voor personeel én 
 - **iPhone**: eerst via Safari → Deel-knop → *Zet op beginscherm*, daarna de app vanaf het beginscherm openen en meldingen aanzetten (iOS 16.4+).
 
 Elke nieuwe rij in de tabel `meldingen` gaat automatisch als pushbericht naar de juiste telefoon(s): een database-trigger roept de Edge Function `rooster-push` aan.
-Installatie: `supabase/push.sql` uitvoeren, Edge Function `supabase/functions/rooster-push/index.ts` aanmaken (Verify JWT uit) met de secrets `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, en `VAPID_PUBLIC_KEY` in `js/config.js`.
+Installatie: `alles-in-een.sql` uitvoeren (Supabase-pakket), Edge Function `rooster-push` aanmaken met `edge-function-rooster-push/index.ts` (Verify JWT uit) met de secrets `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, en `VAPID_PUBLIC_KEY` in `js/config.js`.
 
 ## 5. Goed om te weten
 
-- **Beveiliging:** inloggen gaat met een PIN-code. Dat is handig en simpel, maar het is geen bankbeveiliging: iemand met technische kennis kan de database uitlezen. Zet er dus geen gevoelige gegevens in (geen BSN, IBAN of adres). Naam, telefoonnummer en rooster zijn prima.
+- **Beveiliging:** sinds versie 1.9 (met `beveiliging.sql` uit het Supabase-pakket) controleert de database zelf de PIN. De app kan de tabellen niet meer rechtstreeks lezen. Personeel krijgt alleen wat het nodig heeft: geen PIN-codes, geen beheercode, geen notities of gesprekken, geen ziektegeschiedenis van collega's en alleen de eigen meldingen. Na 10 foute codes binnen 15 minuten wordt die inlog op dat apparaat 15 minuten geblokkeerd. Het blijft een 4-cijferige PIN: zet er dus geen BSN, IBAN of adres in.
 - **Back-up:** via **Instellingen → Back-up downloaden**. Supabase maakt ook zelf dagelijks back-ups.
 - **App op telefoon:** open de personeelspagina en kies *Toevoegen aan beginscherm*. Dan werkt hij als een app.
 - **Uren exporteren:** bij **Rooster → Uren → Exporteer** krijg je een bestand dat in Excel opent, handig voor de salarisadministratie.
 - **Printen:** bij **Rooster** de printerknop; het rooster wordt liggend afgedrukt.
+
+## Versie 1.9 installeren (beveiliging)
+
+Doe het in deze volgorde:
+
+1. **Upload de nieuwe bestanden** naar GitHub (alles uit deze map). De app werkt dan meteen, nog op de oude manier.
+2. Iedereen krijgt bij het openen de melding **Nieuwe versie – even bijwerken**. Deze keer is er geen knop *Later*: bijwerken is nodig voor stap 4.
+3. Wacht een paar dagen, zodat (bijna) iedereen de app een keer geopend heeft.
+4. **Supabase → SQL Editor → New query**: plak `beveiliging.sql` uit het Supabase-pakket (`supabase-rooster-1.9.zip`, niet op GitHub) en klik **Run**. Gebruik daarna voortaan de nieuwe `alles-in-een.sql`; de oude versie zet de tabellen weer open. Vanaf nu is de beveiliging actief.
+5. Iedereen moet daarna **één keer opnieuw zijn PIN invullen** (de naam staat al klaar). Ricardo ook, met de beheercode.
+6. Controleer bij GitHub (Settings → Secrets → Actions) dat `SUPABASE_SERVICE_KEY` de **service_role**-sleutel is. De anon-sleutel werkt voor het automatische rooster niet meer.
+
+Gaat er iets mis? Wie de app op de oude versie had, ziet "Kan geen verbinding maken". Bijwerken lost dat op.
 
 ## Bestanden
 
@@ -139,7 +161,6 @@ js/uitvraag.js        uitvraag zalencentrum (herinneren + inplannen na de termij
 js/common.js          gedeelde functies + demogegevens
 js/beheer.js          logica beheer
 js/personeel.js       logica personeel
-supabase/schema.sql   database aanmaken
 scripts/auto-rooster.cjs        automatisch rooster (GitHub Actions)
 .github/workflows/auto-rooster.yml
 ```
@@ -149,6 +170,8 @@ scripts/auto-rooster.cjs        automatisch rooster (GitHub Actions)
 ## Een nieuwe versie uitbrengen
 
 Iedereen ziet bovenin **Nieuwe versie beschikbaar** met de knoppen **Bijwerken** en **Later**, zodra er een nieuwe versie op GitHub staat.
+
+Staat in `versie.json` `"verplicht": true`, dan is er geen knop *Later* (alleen nodig als de database verandert, zoals bij 1.9). Haal die regel bij de volgende gewone versie weer weg.
 
 Kiest iemand **Later**, dan blijft hij op de oude versie en komt de vraag terug bij elke keer dat de app geopend wordt, tot hij op **Bijwerken** tikt.
 
