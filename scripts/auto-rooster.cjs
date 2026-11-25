@@ -4,7 +4,7 @@
 //  Draait elke ochtend via GitHub Actions (.github/workflows/auto-rooster.yml)
 //  Het rekenwerk gebeurt vroeg; de meldingen gaan pas om WACHT_TOT (bv. 09:00)
 //  de deur uit, zodat niemand om 6 uur 's ochtends een melding krijgt.
-//  Nodig: secrets SUPABASE_URL en SUPABASE_SERVICE_KEY (of SUPABASE_ANON_KEY)
+//  Nodig: secrets SUPABASE_URL en SUPABASE_SERVICE_KEY (service_role)
 // =====================================================================
 const path = require('path');
 globalThis.window = undefined;
@@ -13,8 +13,8 @@ const { supabaseStore } = require(path.join(__dirname, '..', 'js', 'store.js'));
 const Uitvraag = require(path.join(__dirname, '..', 'js', 'uitvraag.js'));
 
 const URL = process.env.SUPABASE_URL;
-const KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error('SUPABASE_URL en SUPABASE_SERVICE_KEY ontbreken'); process.exit(1); }
+const KEY = process.env.SUPABASE_SERVICE_KEY;
+if (!URL || !KEY) { console.error('SUPABASE_URL en SUPABASE_SERVICE_KEY ontbreken (de anon-sleutel werkt niet meer sinds beveiliging.sql)'); process.exit(1); }
 
 const TABELLEN = ['instellingen', 'medewerkers', 'cafetaria_diensten', 'sluitingsdagen', 'zalen_events',
   'roosters', 'diensten', 'verlof', 'beschikbaarheid', 'event_reacties'];
@@ -30,7 +30,8 @@ function minutenNL() {
 }
 
 (async () => {
-  const echt = supabaseStore(URL, KEY);
+  // rechtstreeks met de service_role-sleutel (de beveiligde ingang is voor de app)
+  const echt = supabaseStore(URL, KEY, { rest: true });
   // Meldingen worden eerst verzameld en pas later in één keer verstuurd
   const wachtrij = [];
   const store = Object.assign(Object.create(echt), {
@@ -61,6 +62,9 @@ async function maakRooster(store) {
   for (const t of TABELLEN) data[t] = await store.all(t);
   const ins = data.instellingen[0] || { dagen_voor_einde: 21, auto_publiceren: false };
   data.instellingen = ins;
+  G.pasFunctiesToe(data);   // "wie X kan, kan ook Y"
+  // Geannuleerde feesten blijven alleen voor de statistiek bewaard
+  data.zalen_events = data.zalen_events.filter(e => e.status !== 'geannuleerd');
 
   const nu = process.env.DATUM || vandaagNL();
 
