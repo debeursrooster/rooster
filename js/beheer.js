@@ -145,8 +145,10 @@
       : rv.status === 'voorlopig' ? `personeel geeft door wat ze kunnen · klaar op ${A.datumLang(pl.definitief)}`
       : rv.status === 'concept' ? 'klaar – kijk het na en verstuur het' : 'verstuurd naar het personeel';
 
-    // ---- Nog in te vullen: komende 14 dagen ----
-    const tot = G.addDays(nu, 14);
+    // ---- Nog in te vullen: komende 14 dagen / 1 maand / 2 maanden / alles (keuze wordt onthouden) ----
+    const BEREIK = { '14': ['14 dagen', 14], '31': ['1 maand', 31], '62': ['2 maanden', 62], 'alles': ['Alles', 3650] };
+    let bereik = '14'; try { const b = localStorage.getItem('rooster_open_bereik'); if (BEREIK[b]) bereik = b; } catch (x) { }
+    const tot = G.addDays(nu, BEREIK[bereik][1]);
     const open = groepOpen(d.diensten.filter(x => !x.medewerker_id && x.datum >= nu && x.datum <= tot)
       .sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start)));
     const vlo = groepOpen(vlOpen(nu).filter(x => x.datum <= tot));
@@ -189,8 +191,9 @@
         ${taken.length ? taken.map(([ga, ic, wat, sub, kl, maand]) => `<a class="taak ${kl}" href="${ga.startsWith('#') ? ga : '#' + ga}" ${maand ? `data-maand="${maand}"` : ''}><span class="taak-ic">${ic}</span><span class="taak-tekst"><b>${esc(wat)}</b><small>${esc(sub)}</small></span><span class="taak-pijl">›</span></a>`).join('')
           : '<div class="leeg"><span class="groot">🎉</span>Niets te doen. Alles is geregeld!</div>'}
       </div>
-      <div class="paneel" id="nogOpen"><div class="paneel-kop"><h3>Nog in te vullen · komende 14 dagen</h3><a class="knop klein" href="#rooster">Naar het rooster</a></div>
-        ${open.length || vlo.length ? open.map(openRij).join('') + vlo.map(vlRij).join('') : '<div class="leeg"><span class="groot">👌</span>Alle diensten van de komende 14 dagen zijn ingevuld</div>'}
+      <div class="paneel" id="nogOpen"><div class="paneel-kop" style="flex-wrap:wrap;gap:.5em"><h3>Nog in te vullen${bereik === 'alles' ? '' : ' · komende ' + BEREIK[bereik][0]}</h3>
+          <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap"><div class="tabs" id="openBereik">${Object.entries(BEREIK).map(([k, [l]]) => `<button type="button" data-b="${k}" class="${k === bereik ? 'actief' : ''}">${l}</button>`).join('')}</div><a class="knop klein" href="#rooster">Naar het rooster</a></div></div>
+        ${open.length || vlo.length ? open.map(openRij).join('') + vlo.map(vlRij).join('') : `<div class="leeg"><span class="groot">👌</span>${bereik === 'alles' ? 'Alle diensten zijn ingevuld' : 'Alle diensten van de komende ' + BEREIK[bereik][0] + ' zijn ingevuld'}</div>`}
       </div>
       <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start">
         <div class="paneel"><div class="paneel-kop"><h3>Vandaag aan het werk</h3></div>
@@ -213,6 +216,11 @@
       </details>`;
     hoofd.querySelectorAll('[data-maand]').forEach(a => a.addEventListener('click', () => { staat.maand = a.dataset.maand; }));
     hoofd.querySelectorAll('a.taak[href^="#aanvragen/"]').forEach(a => a.addEventListener('click', () => { staat.aanvraagTab = a.getAttribute('href').split('/')[1]; }));
+    hoofd.querySelectorAll('#openBereik [data-b]').forEach(b => b.onclick = () => {
+      try { localStorage.setItem('rooster_open_bereik', b.dataset.b); } catch (x) { }
+      const y = $('#nogOpen').getBoundingClientRect().top + window.scrollY;
+      pOverzicht(); window.scrollTo(0, y - 10);
+    });
     const no = hoofd.querySelector('a.taak[href="#nogOpen"]');
     if (no) no.onclick = e => { e.preventDefault(); $('#nogOpen').scrollIntoView({ behavior: 'smooth' }); };
     hoofd.querySelectorAll('[data-open]').forEach(x => x.onclick = () => { const dn = A.data.diensten.find(y => y.id === x.dataset.open); staat.maand = dn.maand; dienstModal(dn); });
