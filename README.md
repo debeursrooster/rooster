@@ -111,6 +111,8 @@ Bij **Instellingen → Functies → Wie dit kan, kan ook…** zet je bijvoorbeel
 - Bij **Personeel** heeft iedereen een **kaart**: uren t.o.v. contract, gewerkte diensten, hoe vaak ziek (en hoe kort van tevoren), hoe vaak hij of zij reageert op oproepen en hoe snel, open diensten opgepakt, ruilen, vrije dagen. Bovenaan staat een korte samenvatting (👍 goed / ⚠️ let op). In de personeelslijst en op het Overzicht staat wie aandacht nodig heeft.
 - De reactietijd wordt bijgehouden vanaf versie 1.9. Wordt een feest verwijderd waarop al gereageerd is, dan blijft het als *geannuleerd* bewaard voor de statistiek (het personeel ziet het niet meer).
 
+**Versturen = alles van die maand vastzetten.** Bij *Versturen naar personeel* gaan ook de feesten van die maand mee. Loopt de oproep voor een feest nog, dan wordt het eerst ingedeeld met de reacties die er zijn. Iedereen die is ingepland krijgt een melding. Plekken van Ricardo met "Personeel mag overnemen" blijven open voor wie toch kan. Is het rooster al verstuurd en komen er daarna nog feesten bij, dan staat bij Rooster de knop **📤 Feesten ook versturen**.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.

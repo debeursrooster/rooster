@@ -1,5 +1,4 @@
 {
-  "versie": "1.9",
-  "verplicht": true,
-  "nieuw": "Veiliger inloggen, ziek melden bovenaan, takenlijst, personeelskaart en functies die bij elkaar horen."
+  "versie": "1.9.1",
+  "nieuw": "Rooster versturen zet nu ook de feesten van die maand vast en stuurt iedereen een melding."
 }
