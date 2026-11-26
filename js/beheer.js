@@ -272,8 +272,8 @@
       status = `<div class="statusbalk concept">📝 <div><b>Klaar om na te kijken</b> – het personeel ziet dit rooster pas als jij op Versturen drukt. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
         <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
     } else {
-      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
+      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${feestenNogNietVerstuurd(maand).length ? ` <b class="fout-tekst">${feestenNogNietVerstuurd(maand).length} feest${feestenNogNietVerstuurd(maand).length > 1 ? 'en zijn' : ' is'} nog niet verstuurd.</b>` : vlZin}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${feestenNogNietVerstuurd(maand).length ? `<button class="knop ok" id="feestenMee">📤 Feesten ook versturen (${feestenNogNietVerstuurd(maand).length})</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
     }
 
     hoofd.innerHTML = `
@@ -311,6 +311,7 @@
     if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand));
     if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terugtrekken', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terugtrekken')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
     if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
+    if (k('feestenMee')) k('feestenMee').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, true));
     if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Opmerkingen van de planner', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
 
     const inh = $('#roosterInhoud');
@@ -340,17 +341,42 @@
     pRooster();
   }
 
-  async function publiceer(maand) {
+  // Feesten in deze maand die nog niet verstuurd zijn (oproep loopt nog, of ingedeeld maar niet verstuurd)
+  const feestenNogNietVerstuurd = maand => A.data.zalen_events.filter(e => G.monthOf(e.datum) === maand && e.datum >= G.today() && ['open', 'concept'].includes(e.status))
+    .sort((a, b) => a.datum.localeCompare(b.datum));
+
+  // Versturen = alles van deze maand vastzetten: vaste diensten én feesten. Feesten waarvoor de oproep nog loopt,
+  // worden eerst ingedeeld. Iedereen die is ingepland krijgt één melding per soort (rooster / feesten).
+  async function publiceer(maand, alleenFeesten) {
     const r = A.rooster(maand);
-    const open = A.data.diensten.filter(x => x.maand === maand && !x.medewerker_id).length;
-    if (open && !await A.bevestig('Er zijn nog open diensten', `Er ${open > 1 ? 'zijn' : 'is'} nog ${open} open dienst${open > 1 ? 'en' : ''}. Personeel kan open diensten zelf oppakken. Toch versturen?`, 'Versturen')) return;
-    await Store.update('roosters', r.id, { status: 'gepubliceerd', gepubliceerd_op: new Date().toISOString() });
+    const feesten = feestenNogNietVerstuurd(maand), lopend = feesten.filter(e => e.status === 'open');
+    const open = A.data.diensten.filter(x => x.maand === maand && !x.medewerker_id && !(x.event_id && feesten.some(e => e.id === x.event_id))).length;
+    const regels = [];
+    if (!alleenFeesten) regels.push(`De diensten van ${A.maandNaam(maand)} worden vastgezet en iedereen die is ingeroosterd krijgt een melding.`);
+    if (feesten.length) regels.push(`<b>${feesten.length} feest${feesten.length > 1 ? 'en' : ''} ga${feesten.length > 1 ? 'an' : 'at'} mee:</b> ${feesten.map(e => esc(e.naam) + ' (' + esc(A.datumKort(e.datum)) + ')').join(', ')}.`);
+    if (lopend.length) regels.push(`Voor ${lopend.length === 1 ? 'dit feest' : lopend.length + ' daarvan'} loopt de oproep nog. ${lopend.length === 1 ? 'Dat wordt' : 'Die worden'} nu ingedeeld met de reacties die er zijn; wie nog niet reageerde, wordt niet ingepland.`);
+    if (open) regels.push(`Er ${open > 1 ? 'zijn' : 'is'} nog <b>${open} open dienst${open > 1 ? 'en' : ''}</b>. Het personeel kan die zelf oppakken.`);
+    regels.push(`Plekken van ${esc(beheerNaam())} met "Personeel mag overnemen" blijven open voor wie toch kan werken.`);
+    if (!await A.modal(alleenFeesten ? 'Feesten versturen' : 'Rooster versturen', regels.map(x => `<p>${x}</p>`).join(''),
+      [{ label: 'Annuleren', waarde: false }, { label: '📤 Versturen', soort: 'ok', waarde: true }])) return;
+    // 1. lopende oproepen afsluiten en indelen
+    if (lopend.length) await A.verwerkUitvragen(lopend.map(e => e.id));
     await herlaad();
-    const n = await A.meldRooster(maand);
+    const teVersturen = feestenNogNietVerstuurd(maand).filter(e => e.status === 'concept');
+    for (const e of teVersturen) if (!await dubbelCheck(e.id, '📤 Klopt, versturen')) { opnieuw(); return eventModal(A.event(e.id)); }
+    // 2. rooster vastzetten
+    if (!alleenFeesten && r) await Store.update('roosters', r.id, { status: 'gepubliceerd', gepubliceerd_op: new Date().toISOString() });
     await herlaad();
-    A.toast(n + ' medewerker(s) hebben een melding gekregen', 'ok');
+    // 3. meldingen: feesten en vaste diensten
+    const wie = new Set(A.data.diensten.filter(x => x.medewerker_id && (teVersturen.some(e => e.id === x.event_id) || (!alleenFeesten && x.maand === maand && !x.event_id))).map(x => x.medewerker_id)
+      .filter(id => { const m = A.mw(id); return m && m.actief !== false; }));
+    if (teVersturen.length) await Uitvraag.publiceerEvents(Store, A.data, teVersturen);
+    if (!alleenFeesten) await A.meldRooster(maand);
+    await herlaad();
+    A.toast(wie.size ? `Verstuurd – ${wie.size} medewerker${wie.size > 1 ? 's' : ''} kreeg${wie.size > 1 ? 'en' : ''} een melding${teVersturen.length ? ` (${teVersturen.length} feest${teVersturen.length > 1 ? 'en' : ''} meegestuurd)` : ''}`
+      : 'Verstuurd. Er stond nog niemand ingepland, dus er zijn geen meldingen verstuurd.', 'ok');
     pRooster();
-    deelWhatsApp(maand);
+    if (!alleenFeesten) deelWhatsApp(maand);
   }
 
   function siteUrl() {
