@@ -1505,6 +1505,7 @@
           const verst = perMaand[m].some(e => e.status === 'ingepland' || (!e.status && A.isGepubliceerd(m) && A.data.diensten.some(x => x.event_id === e.id)));
           const conc = perMaand[m].filter(ongedaanbaar).length;
           return '<span style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap">' + (niet ? `<span class="label let">${niet} feest${niet > 1 ? 'en' : ''} nog niet verstuurd</span>` : '')
+            + (perMaand[m].some(e => e.status === 'open') ? ` <button class="knop klein" type="button" data-reagerentot="${m}">⏳ Reageren t/m aanpassen</button>` : '')
             + (conc ? ` <button class="knop klein" type="button" data-ongedaanmaand="${m}">↩ Hele maand ongedaan maken</button>` : '')
             + (niet ? '' : verst ? '<span class="label ok">zalencentrum verstuurd</span>' : '<span class="label">nog niet ingepland</span>') + '</span>'; })()}</div>
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
@@ -1531,6 +1532,26 @@
       const e = A.event(k.dataset.ongedaan);
       if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${e.naam} (${A.datumLang(e.datum)}) vervalt. ${e.uitvraag ? 'De oproep gaat weer open; wie al heeft gereageerd hoeft dat niet opnieuw te doen.' : 'De mensen worden eraf gehaald; de plekken blijven open zodat je ze zelf kunt invullen.'} ${e.status === 'ingepland' ? 'Dit feest was al verstuurd: wie erop stond krijgt een melding dat de dienst vervalt.' : 'Het personeel heeft nog niets gezien, er gaan geen meldingen uit.'}`, 'Ongedaan maken')) return;
       await feestenOngedaan([e]); pZalen(); }); });
+    // Einddatum van de oproep voor alle lopende feesten van een maand tegelijk aanpassen
+    hoofd.querySelectorAll('[data-reagerentot]').forEach(k => k.onclick = () => A.bezig(k, async () => {
+      const m = k.dataset.reagerentot, nu = G.today();
+      const evs = A.data.zalen_events.filter(e => G.monthOf(e.datum) === m && e.status === 'open').sort((a, b) => a.datum.localeCompare(b.datum));
+      const huidig = evs.map(e => e.uitvraag_tot).filter(Boolean).sort()[0] || G.addDays(nu, 7);
+      const tot = await A.modal('Reageren t/m aanpassen', `<p>Tot wanneer mogen de oproepkrachten laten weten of ze kunnen? Dit geldt voor deze ${evs.length} feest${evs.length > 1 ? 'en' : ''} in ${esc(A.maandNaam(m))}:</p>
+        <ul>${evs.map(e => `<li>${esc(A.datumKort(e.datum))} – ${esc(e.naam)} <small class="zacht">(nu t/m ${esc(A.datumKort(e.uitvraag_tot || nu))})</small></li>`).join('')}</ul>
+        <label>Reageren kan tot en met</label><input type="date" id="rtDatum" value="${esc(huidig)}" min="${esc(nu)}" style="max-width:200px">
+        <p class="zacht" style="font-size:.85rem">Een feest moet minstens 2 dagen na deze datum zijn; is dat niet zo, dan wordt voor dat feest 2 dagen ervoor genomen. Na deze datum wordt het feest vanzelf ingedeeld.</p>`,
+        [{ label: 'Annuleren', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => bg.querySelector('#rtDatum').value,
+          controle: bg => { const v = bg.querySelector('#rtDatum').value; return !v ? 'Kies een datum' : v < nu ? 'Die datum is al geweest' : ''; } }]);
+      if (!tot) return;
+      let n = 0;
+      for (const e of evs) {
+        const max = G.addDays(e.datum, -2), t = tot > max ? (max < nu ? nu : max) : tot;
+        if (t !== e.uitvraag_tot) { await Store.update('zalen_events', e.id, { uitvraag_tot: t, herinnerd: false }); n++; }
+      }
+      await herlaad(); pZalen();
+      A.toast(n ? `Reageren kan nu t/m ${A.datumKort(tot)} (${n} feest${n > 1 ? 'en' : ''} aangepast)` : 'Niets veranderd', n ? 'ok' : '');
+    }));
     hoofd.querySelectorAll('[data-ongedaanmaand]').forEach(k => k.onclick = () => A.bezig(k, async () => {
       const m = k.dataset.ongedaanmaand, evs = A.data.zalen_events.filter(e => G.monthOf(e.datum) === m && ongedaanbaar(e)).sort((a, b) => a.datum.localeCompare(b.datum));
       const verst = evs.filter(e => e.status === 'ingepland'), mensen = new Set(A.data.diensten.filter(x => verst.some(e => e.id === x.event_id) && x.medewerker_id).map(x => x.medewerker_id)).size;

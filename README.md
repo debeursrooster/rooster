@@ -127,6 +127,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Inplannen ongedaan maken.** Bij **Zalencentrum** staat naast elk feest dat *ingepland · nog niet verstuurd* is een knop **↩ Ongedaan maken**, en bovenaan de maand **↩ Hele maand ongedaan maken**. Bij een feest met oproep vervalt de indeling en gaat de oproep weer open (reacties blijven staan). Bij een feest zonder oproep worden de mensen eraf gehaald en blijven de plekken open om zelf in te vullen. Dat werkt ook voor feesten die al verstuurd zijn (zoals een hele maand december): wie erop stond krijgt dan één bericht dat de dienst vervalt. Bij feesten die nog niet verstuurd waren gaan er geen meldingen uit. In het venster zie je precies welke feesten het zijn.
 
+**Reageren t/m voor de hele maand.** Lopen er oproepen in een maand, dan staat bovenaan die maand bij **Zalencentrum** de knop **⏳ Reageren t/m aanpassen**. Kies één datum en die geldt voor alle feesten van die maand waarvoor de oproep nog loopt. Ligt een feest te dichtbij, dan wordt voor dat feest automatisch 2 dagen ervoor genomen.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.
