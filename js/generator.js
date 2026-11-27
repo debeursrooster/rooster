@@ -587,7 +587,9 @@
     const slots = G.buildSlots(maand, data);
     // andere maanden + diensten van feesten die al via de uitvraag zijn vastgezet tellen mee
     const elders = (data.diensten || []).filter(d => d.maand !== maand || G.dienstVast(d, data));
-    return G.plan(slots, data, elders, opties);
+    // Cafetaria: oproepkrachten (geen contracturen en geen vaste werkdagen) worden nooit vanzelf ingepland.
+    // Zij kiezen zelf: via de uitvraag ("Ik kan") of door een open dienst op te pakken.
+    return G.plan(slots, data, elders, { cafFase: 'vast', ...(opties || {}) });
   };
 
   // Ronde 1: voorlopig rooster – cafetaria alleen met vaste krachten (contracturen of vaste werkdagen)

@@ -64,7 +64,7 @@ Uit die mensen kiest de planner wie het **beste past**:
 - **vaste werkdag** krijgt voorrang;
 - wie nog het meeste **uren tekort** komt op zijn contract (contracturen × dagen in de maand ÷ 7);
 - liever geen twee diensten op één dag, liever geen vroege dienst na een late avond;
-- **oproepkrachten** (0 contracturen) komen pas aan de beurt als het anders niet lukt;
+- **oproepkrachten** (0 contracturen en geen vaste werkdagen) worden bij de **cafetaria nooit vanzelf** ingepland: zij kiezen zelf via "Ik kan" bij Beschikbaar of pakken een open dienst op. Wie 0 uur heeft maar wel vaste werkdagen, wordt alleen op die vaste dagen ingepland. Bij feesten met een oproep worden alleen oproepkrachten ingepland die "kan" zeiden;
 - wie vrij heeft aangevraagd dat nog niet is goedgekeurd, wordt zo veel mogelijk ontzien.
 
 Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt hij in de lijst *aandachtspunten*. Het personeel kan open diensten zelf oppakken.
