@@ -133,6 +133,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Handleidingen.** In de map `handleiding` staan twee handleidingen met schermafbeeldingen: `ricardo.html` (beheer; link *📖 Handleiding* onderaan de linkerbalk) en `personeel.html` (link *📖 Hoe werkt de app?* op het inlogscherm en onder Mijn diensten). Ze zijn ook af te drukken.
 
+**Uitnodigingen printen.** Bij **Personeel → 🪪 Alle uitnodigingen printen** kies je wie een kaartje krijgt; er komen 8 kaartjes (naam, QR-code, inlogcode) op een A4 om uit te knippen. Bij **Nog in te vullen** op het Overzicht staat de maand als kopje boven de dagen.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.

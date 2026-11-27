@@ -527,3 +527,6 @@ details.paneel[open] > summary::before { content: '▾'; }
 .uitleg-klein summary { display: inline; cursor: pointer; text-decoration: underline; list-style: none; }
 .uitleg-klein summary::-webkit-details-marker { display: none; }
 .uitleg-klein[open] { display: block; margin-top: .3em; }
+
+.maand-kop { margin: 1em 0 .1em; padding-bottom: .3em; border-bottom: 2px solid var(--lijn); font-size: .95rem; text-transform: capitalize; color: var(--zacht); }
+.maand-kop:first-of-type { margin-top: .2em; }

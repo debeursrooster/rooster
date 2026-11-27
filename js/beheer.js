@@ -217,7 +217,9 @@
       </div>
       <div class="paneel" id="nogOpen"><div class="paneel-kop" style="flex-wrap:wrap;gap:.5em"><h3>Nog in te vullen${bereik === 'alles' ? '' : ' · komende ' + BEREIK[bereik][0]}</h3>
           <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap"><div class="tabs" id="openBereik">${Object.entries(BEREIK).map(([k, [l]]) => `<button type="button" data-b="${k}" class="${k === bereik ? 'actief' : ''}">${l}</button>`).join('')}</div><a class="knop klein" href="#rooster">Naar het rooster</a></div></div>
-        ${open.length || vlo.length ? open.map(openRij).join('') + vlo.map(vlRij).join('') : `<div class="leeg"><span class="groot">👌</span>${bereik === 'alles' ? 'Alle diensten zijn ingevuld' : 'Alle diensten van de komende ' + BEREIK[bereik][0] + ' zijn ingevuld'}</div>`}
+        ${open.length || vlo.length ? (() => { // op datum, met de maand ertussen
+            const rijen = open.map(g => [g.x.datum, openRij(g)]).concat(vlo.map(g => [g.x.datum, vlRij(g)])).sort((a, b) => a[0].localeCompare(b[0]));
+            let mnd = ''; return rijen.map(([dag, html]) => { const m = G.monthOf(dag), kop = m !== mnd ? `<h4 class="maand-kop">${esc(A.maandNaam(m))}</h4>` : ''; mnd = m; return kop + html; }).join(''); })() : `<div class="leeg"><span class="groot">👌</span>${bereik === 'alles' ? 'Alle diensten zijn ingevuld' : 'Alle diensten van de komende ' + BEREIK[bereik][0] + ' zijn ingevuld'}</div>`}
       </div>
       <div class="rij" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start">
         <div class="paneel"><div class="paneel-kop"><h3>Vandaag aan het werk</h3></div>
@@ -2049,7 +2051,7 @@
     if (sub) return pMedewerker(decodeURIComponent(sub));
     const alle = A.data.medewerkers.slice().sort((a, b) => (b.actief !== false) - (a.actief !== false) || a.naam.localeCompare(b.naam));
     const maand = G.monthOf(G.today());
-    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
+    hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwKaartjes" type="button">🪪 Alle uitnodigingen printen</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th>Beeld</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
         <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}${m.langdurig_ziek ? ' <span class="label fout">langdurig ziek</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
@@ -2065,6 +2067,7 @@
     $('#nieuwMw').onclick = () => mwModal(null);
     $('#mwBericht').onclick = () => berichtAanPersoneel();
     $('#mwPoster').onclick = () => posterPrinten();
+    $('#mwKaartjes').onclick = () => alleKaartjes();
     hoofd.querySelectorAll('[data-uitnodig]').forEach(b => b.onclick = e => { e.stopPropagation(); uitnodigen(A.mw(b.dataset.uitnodig)); });
     hoofd.querySelectorAll('[data-mw]').forEach(r => r.onclick = () => { const m = A.mw(r.dataset.mw); if (m.actief === false) mwModal(m); else location.hash = 'personeel/' + m.id; });
   }
@@ -2155,6 +2158,41 @@
       <div class="pin">${esc(m.pin)}</div>
       <p class="klein" style="margin:0 0 3mm">Zet de app daarna op je beginscherm en zet de meldingen aan.<br>Bewaar je code goed en deel hem met niemand.</p>
       <div class="url">${esc(siteUrl())}</div></div>`);
+  }
+
+  // Uitnodigingen van meerdere mensen tegelijk: 8 kaartjes per A4 om uit te knippen
+  async function alleKaartjes() {
+    const mws = actieveMw().filter(m => m.pin).sort((a, b) => a.naam.localeCompare(b.naam));
+    if (!mws.length) return A.toast('Er is nog geen personeel met een inlogcode', 'fout');
+    const ids = await A.modal('Uitnodigingen printen', `<p>Kies wie een kaartje krijgt. Er passen <b>8 kaartjes op een A4</b>; knip ze uit langs de stippellijn en geef iedereen zijn eigen kaartje.</p>
+      <p style="margin:.3em 0"><a href="#" id="kAlle">Alles aan</a> · <a href="#" id="kGeen">Alles uit</a></p>
+      <div style="columns:2;column-gap:1.5em">${mws.map(m => `<label class="check" style="display:flex;margin:.25em 0;break-inside:avoid"><input type="checkbox" class="kMw" value="${m.id}" checked> ${esc(m.naam)}</label>`).join('')}</div>
+      <p class="zacht" style="font-size:.85rem;margin-top:.8em">🔒 Op elk kaartje staat de persoonlijke inlogcode. Geef het kaartje alleen aan die persoon en gooi misdrukken weg.</p>`,
+      [{ label: 'Annuleren', waarde: null }, { label: '🖨 Printen', soort: 'primair', waarde: bg => [...bg.querySelectorAll('.kMw:checked')].map(i => i.value),
+        controle: bg => bg.querySelector('.kMw:checked') ? null : 'Kies minstens één persoon' }],
+      bg => { const zet = v => e => { e.preventDefault(); bg.querySelectorAll('.kMw').forEach(i => i.checked = v); };
+        bg.querySelector('#kAlle').onclick = zet(true); bg.querySelector('#kGeen').onclick = zet(false); });
+    if (!ids) return;
+    const kaart = m => `<div class="vk">
+        <div class="vk-qr">${qrSvg(persoonlijkeLink(m), 300)}</div>
+        <div class="vk-tekst"><img class="vk-logo" src="logo-licht.svg" alt="">
+          <div class="vk-naam">Hoi ${esc(m.naam)}!</div>
+          <div class="vk-klein">Scan de code met je telefoon. Jouw inlogcode:</div>
+          <div class="vk-pin">${esc(m.pin)}</div>
+          <div class="vk-klein">Deel je code met niemand.</div></div></div>`;
+    printVenster('Uitnodigingen', `<style>
+        @page { size: A4; margin: 10mm; }
+        .vellen { display: grid; grid-template-columns: 90mm 90mm; grid-auto-rows: 62mm; justify-content: center; gap: 0; break-after: page; page-break-after: always; }
+        .vellen:last-of-type { break-after: auto; page-break-after: auto; }
+        .vk { border: 1px dashed #b9a790; display: flex; align-items: center; gap: 4mm; padding: 4mm 5mm; text-align: left; break-inside: avoid; page-break-inside: avoid; overflow: hidden; }
+        .vk-qr { width: 34mm; flex: none; } .vk-qr svg { width: 100%; height: auto; display: block; }
+        .vk-tekst { min-width: 0; } .vk-logo { height: 10mm; display: block; margin: 0 0 2mm; }
+        .vk-naam { font-size: 13pt; font-weight: 800; margin-bottom: 1.5mm; line-height: 1.15; }
+        .vk-klein { font-size: 7.5pt; color: #6b5e50; line-height: 1.3; }
+        .vk-pin { font-size: 20pt; font-weight: 800; letter-spacing: .12em; margin: .5mm 0 1mm; }
+        .uitleg { font-size: 10pt; color: #6b5e50; margin: 0 0 4mm; } @media print { .uitleg { display: none; } }
+      </style><p class="uitleg">${ids.length} kaartje${ids.length > 1 ? 's' : ''} · knip langs de stippellijn</p>
+      ${Array.from({ length: Math.ceil(ids.length / 8) }, (_, i) => `<div class="vellen">${ids.slice(i * 8, i * 8 + 8).map(id => kaart(A.mw(id))).join('')}</div>`).join('')}`);
   }
 
   function posterPrinten() {
