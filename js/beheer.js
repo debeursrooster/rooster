@@ -261,12 +261,19 @@
     const cafKnop = staat.loc === 'zalen' ? zalenKnopHtml
       : staat.loc === 'cafetaria' || !nZalen ? '<button class="knop ok" id="publiceer">📤 Cafetaria versturen</button>'
       : `<button class="knop ok" id="publiceerAlles">📤 Alles versturen</button>`;
+    // Terugtrekken volgt ook het tabblad
+    const zalenVerstuurd = d.zalen_events.filter(e => G.monthOf(e.datum) === maand && e.datum >= nu && e.status === 'ingepland');
+    const cafVerstuurd = !!r && r.status === 'gepubliceerd';
+    const terugWat = staat.loc === 'cafetaria' ? (cafVerstuurd ? 'caf' : '')
+      : staat.loc === 'zalen' ? (zalenVerstuurd.length ? 'zalen' : '')
+      : cafVerstuurd && zalenVerstuurd.length ? 'alles' : cafVerstuurd ? 'caf' : zalenVerstuurd.length ? 'zalen' : '';
+    const terugKnop = terugWat ? `<button class="knop klein" id="terugtrekken" data-wat="${terugWat}">↩︎ ${{ caf: 'Cafetaria', zalen: 'Zalencentrum', alles: 'Alles' }[terugWat]} terugtrekken</button>` : '';
     const zalenZin = nZalen ? ` <b class="fout-tekst">Zalencentrum: ${nZalen} feest${nZalen > 1 ? 'en' : ''} nog niet verstuurd.</b>` : (d.zalen_events.some(e => G.monthOf(e.datum) === maand && e.status === 'ingepland') ? ' Zalencentrum: verstuurd.' : '');
     if (!r) {
       const gd = pl.definitief;
       const tweeRondes = pl.aan && gd > nu;
       status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${tweeRondes ? `Je hoeft niets te doen. Op <b>${esc(A.datumLang(pl.ronde1 < nu ? nu : pl.ronde1))}</b> begint de app vanzelf: eerst worden de vaste krachten ingepland, daarna mogen oproepkrachten aangeven wat ze kunnen. Op <b>${esc(A.datumLang(gd))}</b> is het rooster klaar om na te kijken.` : gd >= nu ? 'De app maakt het vanzelf op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
-        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Nu al beginnen</button><button class="knop klein" id="maakRooster">Meteen het hele rooster maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}${zalenKnop}</div></div>`;
+        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Nu al beginnen</button><button class="knop klein" id="maakRooster">Meteen het hele rooster maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}${terugKnop}${zalenKnop}</div></div>`;
     } else if (r.status === 'voorlopig') {
       const cafOpen = Uitvraag.cafOpen(d, maand), ids = new Set(cafOpen.map(x => x.id));
       const groep = G.cafOproepGroep(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
@@ -284,14 +291,14 @@
       const nu1 = stappen.findIndex(x => !x[2]);
       status = `<div class="statusbalk concept">⏳ <div><b>Het personeel geeft door wat ze kunnen.</b> Je hoeft niets te doen: de app maakt het rooster vanzelf af op <b>${esc(A.datumLang(pl.definitief))}</b>. Nu nog <b>${cafOpen.length} open cafetariadienst${cafOpen.length === 1 ? '' : 'en'}</b>.${vlZin}
           <ol class="tijdlijn">${stappen.map(([wat, dt, klaar, sub], i) => `<li class="${klaar ? 'klaar' : i === nu1 ? 'nu' : ''}"><b>${klaar ? '✓' : i === nu1 ? '●' : '○'} ${esc(wat)}</b> <small>${esc(A.datumKort(dt))}${sub ? ' · ' + esc(sub) : ''}</small></li>`).join('')}</ol></div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button>${zalenKnop}</div></div>`;
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button>${terugKnop}${zalenKnop}</div></div>`;
     } else if (r.status === 'concept') {
       const cafOpenN = d.diensten.filter(x => x.maand === maand && x.locatie === 'cafetaria' && !x.medewerker_id).length;
       status = `<div class="statusbalk concept">📝 <div><b>Cafetaria: klaar om na te kijken</b> – het personeel ziet de cafetaria pas als jij op Versturen drukt. ${cafOpenN ? `<b>${cafOpenN} open cafetariadienst${cafOpenN > 1 ? 'en' : ''}.</b>` : 'Alle cafetariadiensten zijn ingevuld.'}${zalenZin}${nZalen ? '' : vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button>${cafKnop}</div></div>`;
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button>${terugKnop}${cafKnop}</div></div>`;
     } else {
       status = `<div class="statusbalk gepubliceerd">✅ <div><b>Cafetaria verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan het zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${zalenZin}${nZalen ? '' : vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${zalenKnop}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${zalenKnop}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button>${terugKnop}</div></div>`;
     }
 
     hoofd.innerHTML = `
@@ -328,7 +335,7 @@
     if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Rooster weggooien', 'Het rooster (nog niet verstuurd) voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
     if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'caf'));
     if (k('publiceerAlles')) k('publiceerAlles').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'alles'));
-    if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terugtrekken', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terugtrekken')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
+    if (k('terugtrekken')) k('terugtrekken').onclick = e => A.bezig(e.currentTarget, () => terugtrekken(maand, e.currentTarget.dataset.wat));
     if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
     if (k('zalenVersturen')) k('zalenVersturen').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'zalen'));
     if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Opmerkingen van de planner', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
@@ -407,6 +414,19 @@
       : `${titel} verstuurd. Er stond nog niemand ingepland, dus er zijn geen meldingen verstuurd.`, 'ok');
     pRooster();
     if (caf) deelWhatsApp(maand);
+  }
+
+  // Verstuurd rooster weer verbergen voor het personeel. wat: 'caf' | 'zalen' | 'alles'
+  async function terugtrekken(maand, wat) {
+    const r = A.rooster(maand), caf = wat !== 'zalen', zalen = wat !== 'caf';
+    const feesten = zalen ? A.data.zalen_events.filter(e => G.monthOf(e.datum) === maand && e.datum >= G.today() && e.status === 'ingepland') : [];
+    const delen = [caf ? `de cafetaria van ${A.maandNaam(maand)}` : '', feesten.length ? `${feesten.length} feest${feesten.length > 1 ? 'en' : ''} (${feesten.map(e => e.naam).join(', ')})` : ''].filter(Boolean);
+    if (!await A.bevestig((wat === 'alles' ? 'Alles' : caf ? 'Cafetaria' : 'Zalencentrum') + ' terugtrekken',
+      `Het personeel ziet ${delen.join(' en ')} dan niet meer, tot je opnieuw verstuurt. De indeling blijft staan; je kunt hem rustig aanpassen. Er gaan geen meldingen uit.`, 'Terugtrekken')) return;
+    if (caf && r) await Store.update('roosters', r.id, { status: 'concept' });
+    for (const e of feesten) await Store.update('zalen_events', e.id, { status: 'concept' });
+    await herlaad(); pRooster();
+    A.toast('Teruggetrokken – het personeel ziet dit niet meer', 'ok');
   }
 
   function siteUrl() {
