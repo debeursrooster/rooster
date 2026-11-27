@@ -253,11 +253,20 @@
 
     let status;
     const pl = Uitvraag.maandPlanning(d, maand);
+    // Zalencentrum los van de cafetaria versturen
+    const nZalen = feestenNogNietVerstuurd(maand).length;
+    // Welke knop? Volgt het tabblad: Alles = alles, Cafetaria = alleen cafetaria, Zalen = alleen zalencentrum
+    const zalenKnopHtml = nZalen ? `<button class="knop ok" id="zalenVersturen">📤 Zalencentrum versturen (${nZalen} feest${nZalen > 1 ? 'en' : ''})</button>` : '';
+    const zalenKnop = staat.loc === 'cafetaria' ? '' : zalenKnopHtml;   // bij voorlopig / al verstuurd / nog geen rooster
+    const cafKnop = staat.loc === 'zalen' ? zalenKnopHtml
+      : staat.loc === 'cafetaria' || !nZalen ? '<button class="knop ok" id="publiceer">📤 Cafetaria versturen</button>'
+      : `<button class="knop ok" id="publiceerAlles">📤 Alles versturen</button>`;
+    const zalenZin = nZalen ? ` <b class="fout-tekst">Zalencentrum: ${nZalen} feest${nZalen > 1 ? 'en' : ''} nog niet verstuurd.</b>` : (d.zalen_events.some(e => G.monthOf(e.datum) === maand && e.status === 'ingepland') ? ' Zalencentrum: verstuurd.' : '');
     if (!r) {
       const gd = pl.definitief;
       const tweeRondes = pl.aan && gd > nu;
       status = `<div class="statusbalk geen">📭 <div><b>Nog geen rooster voor ${esc(A.maandNaam(maand))}.</b> ${tweeRondes ? `Je hoeft niets te doen. Op <b>${esc(A.datumLang(pl.ronde1 < nu ? nu : pl.ronde1))}</b> begint de app vanzelf: eerst worden de vaste krachten ingepland, daarna mogen oproepkrachten aangeven wat ze kunnen. Op <b>${esc(A.datumLang(gd))}</b> is het rooster klaar om na te kijken.` : gd >= nu ? 'De app maakt het vanzelf op ' + esc(A.datumLang(gd)) + '.' : ''}${vlZin}</div>
-        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Nu al beginnen</button><button class="knop klein" id="maakRooster">Meteen het hele rooster maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}</div></div>`;
+        <div class="acties">${tweeRondes ? '<button class="knop primair" id="maakVoorlopig">⏳ Nu al beginnen</button><button class="knop klein" id="maakRooster">Meteen het hele rooster maken</button>' : '<button class="knop primair" id="maakRooster">✨ Rooster nu maken</button>'}${zalenKnop}</div></div>`;
     } else if (r.status === 'voorlopig') {
       const cafOpen = Uitvraag.cafOpen(d, maand), ids = new Set(cafOpen.map(x => x.id));
       const groep = G.cafOproepGroep(d).filter(m => cafOpen.some(x => G.cafPast(m, x)));
@@ -275,13 +284,14 @@
       const nu1 = stappen.findIndex(x => !x[2]);
       status = `<div class="statusbalk concept">⏳ <div><b>Het personeel geeft door wat ze kunnen.</b> Je hoeft niets te doen: de app maakt het rooster vanzelf af op <b>${esc(A.datumLang(pl.definitief))}</b>. Nu nog <b>${cafOpen.length} open cafetariadienst${cafOpen.length === 1 ? '' : 'en'}</b>.${vlZin}
           <ol class="tijdlijn">${stappen.map(([wat, dt, klaar, sub], i) => `<li class="${klaar ? 'klaar' : i === nu1 ? 'nu' : ''}"><b>${klaar ? '✓' : i === nu1 ? '●' : '○'} ${esc(wat)}</b> <small>${esc(A.datumKort(dt))}${sub ? ' · ' + esc(sub) : ''}</small></li>`).join('')}</ol></div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button></div></div>`;
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop primair" id="maakDefinitief">✅ Nu definitief maken</button>${zalenKnop}</div></div>`;
     } else if (r.status === 'concept') {
-      status = `<div class="statusbalk concept">📝 <div><b>Klaar om na te kijken</b> – het personeel ziet dit rooster pas als jij op Versturen drukt. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : 'Alle vaste diensten zijn ingevuld.'}${vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button><button class="knop ok" id="publiceer">📤 Versturen naar personeel</button></div></div>`;
+      const cafOpenN = d.diensten.filter(x => x.maand === maand && x.locatie === 'cafetaria' && !x.medewerker_id).length;
+      status = `<div class="statusbalk concept">📝 <div><b>Cafetaria: klaar om na te kijken</b> – het personeel ziet de cafetaria pas als jij op Versturen drukt. ${cafOpenN ? `<b>${cafOpenN} open cafetariadienst${cafOpenN > 1 ? 'en' : ''}.</b>` : 'Alle cafetariadiensten zijn ingevuld.'}${zalenZin}${nZalen ? '' : vlZin}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length} opmerkingen van de planner</button>` : ''}<button class="knop klein" id="opnieuwRooster">🔄 Opnieuw maken</button><button class="knop klein" id="verwijderRooster">🗑 Weggooien</button>${cafKnop}</div></div>`;
     } else {
-      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan dit rooster zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${feestenNogNietVerstuurd(maand).length ? ` <b class="fout-tekst">${feestenNogNietVerstuurd(maand).length} feest${feestenNogNietVerstuurd(maand).length > 1 ? 'en zijn' : ' is'} nog niet verstuurd.</b>` : vlZin}</div>
-        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${feestenNogNietVerstuurd(maand).length ? `<button class="knop ok" id="feestenMee">📤 Feesten ook versturen (${feestenNogNietVerstuurd(maand).length})</button>` : ''}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
+      status = `<div class="statusbalk gepubliceerd">✅ <div><b>Cafetaria verstuurd</b> ${r.gepubliceerd_op ? 'op ' + new Date(r.gepubliceerd_op).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : ''} – personeel kan het zien. ${open ? `<b>${open} open dienst${open > 1 ? 'en' : ''}.</b>` : ''}${zalenZin}${nZalen ? '' : vlZin}</div>
+        <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${zalenKnop}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button><button class="knop klein" id="terugConcept">↩︎ Terugtrekken</button></div></div>`;
     }
 
     hoofd.innerHTML = `
@@ -316,10 +326,11 @@
     });
     if (k('opnieuwRooster')) k('opnieuwRooster').onclick = async e => { if (await A.bevestig('Opnieuw maken', 'Alle diensten van ' + A.maandNaam(maand) + ' worden opnieuw verdeeld. Handmatige wijzigingen gaan verloren. Feesten die al zijn ingedeeld blijven staan.', 'Opnieuw maken')) A.bezig(e.target, () => maakRooster(maand, true)); };
     if (k('verwijderRooster')) k('verwijderRooster').onclick = async () => { if (await A.bevestig('Rooster weggooien', 'Het rooster (nog niet verstuurd) voor ' + A.maandNaam(maand) + ' wordt verwijderd.', 'Weggooien')) { await verwijderMaandDiensten(maand); await Store.remove('roosters', r.id); await herlaad(); pRooster(); } };
-    if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand));
+    if (k('publiceer')) k('publiceer').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'caf'));
+    if (k('publiceerAlles')) k('publiceerAlles').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'alles'));
     if (k('terugConcept')) k('terugConcept').onclick = async () => { if (await A.bevestig('Terugtrekken', 'Het personeel ziet dit rooster dan niet meer tot je opnieuw publiceert.', 'Terugtrekken')) { await Store.update('roosters', r.id, { status: 'concept' }); await herlaad(); pRooster(); } };
     if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
-    if (k('feestenMee')) k('feestenMee').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, true));
+    if (k('zalenVersturen')) k('zalenVersturen').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'zalen'));
     if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Opmerkingen van de planner', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
 
     const inh = $('#roosterInhoud');
@@ -349,42 +360,53 @@
     pRooster();
   }
 
-  // Feesten in deze maand die nog niet verstuurd zijn (oproep loopt nog, of ingedeeld maar niet verstuurd)
-  const feestenNogNietVerstuurd = maand => A.data.zalen_events.filter(e => G.monthOf(e.datum) === maand && e.datum >= G.today() && ['open', 'concept'].includes(e.status))
+  // Feesten in deze maand die het personeel nog niet ziet: oproep loopt nog, ingedeeld maar niet verstuurd,
+  // of (zonder oproep) mee ingepland met een maandrooster waarvan de cafetaria nog niet verstuurd is
+  const feestenNogNietVerstuurd = maand => A.data.zalen_events.filter(e => G.monthOf(e.datum) === maand && e.datum >= G.today() && (['open', 'concept'].includes(e.status)
+      || (!e.status && !A.isGepubliceerd(maand) && A.data.diensten.some(x => x.event_id === e.id))))
     .sort((a, b) => a.datum.localeCompare(b.datum));
+  // Feesten zonder oproep die nu nog "meeliften" met het maandrooster: eerst losmaken (status concept),
+  // zodat ze niet zichtbaar worden als alleen de cafetaria verstuurd wordt
+  async function feestenLosmaken(maand) {
+    for (const e of A.data.zalen_events.filter(e => G.monthOf(e.datum) === maand && !e.status && !A.isGepubliceerd(maand) && A.data.diensten.some(x => x.event_id === e.id)))
+      await Store.update('zalen_events', e.id, { status: 'concept' });
+  }
 
-  // Versturen = alles van deze maand vastzetten: vaste diensten én feesten. Feesten waarvoor de oproep nog loopt,
-  // worden eerst ingedeeld. Iedereen die is ingepland krijgt één melding per soort (rooster / feesten).
-  async function publiceer(maand, alleenFeesten) {
-    const r = A.rooster(maand);
-    const feesten = feestenNogNietVerstuurd(maand), lopend = feesten.filter(e => e.status === 'open');
-    const open = A.data.diensten.filter(x => x.maand === maand && !x.medewerker_id && !(x.event_id && feesten.some(e => e.id === x.event_id))).length;
+  // wat: 'alles', 'caf' = alleen cafetaria (maandrooster), 'zalen' = alleen de feesten van deze maand
+  async function publiceer(maand, wat) {
+    const r = A.rooster(maand), caf = wat !== 'zalen', zalen = wat !== 'caf';
+    const feesten = zalen ? feestenNogNietVerstuurd(maand) : [], lopend = feesten.filter(e => e.status === 'open');
+    const open = (caf ? A.data.diensten.filter(x => x.maand === maand && x.locatie === 'cafetaria' && !x.medewerker_id).length : 0)
+      + (zalen ? A.data.diensten.filter(x => !x.medewerker_id && feesten.some(e => e.id === x.event_id)).length : 0);
     const regels = [];
-    if (!alleenFeesten) regels.push(`De diensten van ${A.maandNaam(maand)} worden vastgezet en iedereen die is ingeroosterd krijgt een melding.`);
-    if (feesten.length) regels.push(`<b>${feesten.length} feest${feesten.length > 1 ? 'en' : ''} ga${feesten.length > 1 ? 'an' : 'at'} mee:</b> ${feesten.map(e => esc(e.naam) + ' (' + esc(A.datumKort(e.datum)) + ')').join(', ')}.`);
-    if (lopend.length) regels.push(`Voor ${lopend.length === 1 ? 'dit feest' : lopend.length + ' daarvan'} loopt de oproep nog. ${lopend.length === 1 ? 'Dat wordt' : 'Die worden'} nu ingedeeld met de reacties die er zijn; wie nog niet reageerde, wordt niet ingepland.`);
+    if (caf) regels.push(`De <b>cafetaria</b>diensten van ${esc(A.maandNaam(maand))} worden vastgezet en iedereen die daar is ingeroosterd krijgt een melding.${zalen ? '' : ' Het zalencentrum gaat niet mee.'}`);
+    if (zalen && feesten.length) regels.push(`<b>${feesten.length} feest${feesten.length > 1 ? 'en' : ''} in het zalencentrum:</b> ${feesten.map(e => esc(e.naam) + ' (' + esc(A.datumKort(e.datum)) + ')').join(', ')}. Iedereen die is ingedeeld krijgt een melding.${caf ? '' : ' De cafetaria gaat niet mee.'}`);
+    if (lopend.length) regels.push(`Voor ${lopend.length === 1 ? 'één feest' : lopend.length + ' feesten'} loopt de oproep nog. ${lopend.length === 1 ? 'Dat wordt' : 'Die worden'} nu ingedeeld met de reacties die er zijn; wie nog niet reageerde, wordt niet ingepland.`);
     if (open) regels.push(`Er ${open > 1 ? 'zijn' : 'is'} nog <b>${open} open dienst${open > 1 ? 'en' : ''}</b>. Het personeel kan die zelf oppakken.`);
-    regels.push(`Plekken van ${esc(beheerNaam())} met "Personeel mag overnemen" blijven open voor wie toch kan werken.`);
-    if (!await A.modal(alleenFeesten ? 'Feesten versturen' : 'Rooster versturen', regels.map(x => `<p>${x}</p>`).join(''),
+    if (zalen) regels.push(`Plekken van ${esc(beheerNaam())} met "Personeel mag overnemen" blijven open voor wie toch kan werken.`);
+    const titel = wat === 'alles' ? 'Alles' : caf ? 'Cafetaria' : 'Zalencentrum';
+    if (!await A.modal(titel + ' versturen', regels.map(x => `<p>${x}</p>`).join(''),
       [{ label: 'Annuleren', waarde: false }, { label: '📤 Versturen', soort: 'ok', waarde: true }])) return;
-    // 1. lopende oproepen afsluiten en indelen
-    if (lopend.length) await A.verwerkUitvragen(lopend.map(e => e.id));
+    // feesten die nog meeliften eerst losmaken, zodat de twee echt apart gaan
+    await feestenLosmaken(maand);
+    let teVersturen = [];
+    if (zalen) {
+      if (lopend.length) await A.verwerkUitvragen(lopend.map(e => e.id));
+      await herlaad();
+      teVersturen = A.data.zalen_events.filter(e => feesten.some(f => f.id === e.id) && e.status === 'concept');
+      for (const e of teVersturen) if (!await dubbelCheck(e.id, '📤 Klopt, versturen')) { await herlaad(); opnieuw(); return eventModal(A.event(e.id)); }
+    }
+    if (caf && r) await Store.update('roosters', r.id, { status: 'gepubliceerd', gepubliceerd_op: new Date().toISOString() });
     await herlaad();
-    const teVersturen = feestenNogNietVerstuurd(maand).filter(e => e.status === 'concept');
-    for (const e of teVersturen) if (!await dubbelCheck(e.id, '📤 Klopt, versturen')) { opnieuw(); return eventModal(A.event(e.id)); }
-    // 2. rooster vastzetten
-    if (!alleenFeesten && r) await Store.update('roosters', r.id, { status: 'gepubliceerd', gepubliceerd_op: new Date().toISOString() });
-    await herlaad();
-    // 3. meldingen: feesten en vaste diensten
-    const wie = new Set(A.data.diensten.filter(x => x.medewerker_id && (teVersturen.some(e => e.id === x.event_id) || (!alleenFeesten && x.maand === maand && !x.event_id))).map(x => x.medewerker_id)
-      .filter(id => { const m = A.mw(id); return m && m.actief !== false; }));
+    const wie = new Set(A.data.diensten.filter(x => x.medewerker_id && ((zalen && teVersturen.some(e => e.id === x.event_id)) || (caf && x.maand === maand && !x.event_id)))
+      .map(x => x.medewerker_id).filter(id => { const m = A.mw(id); return m && m.actief !== false; }));
     if (teVersturen.length) await Uitvraag.publiceerEvents(Store, A.data, teVersturen);
-    if (!alleenFeesten) await A.meldRooster(maand);
+    if (caf) await A.meldRooster(maand);
     await herlaad();
-    A.toast(wie.size ? `Verstuurd – ${wie.size} medewerker${wie.size > 1 ? 's' : ''} kreeg${wie.size > 1 ? 'en' : ''} een melding${teVersturen.length ? ` (${teVersturen.length} feest${teVersturen.length > 1 ? 'en' : ''} meegestuurd)` : ''}`
-      : 'Verstuurd. Er stond nog niemand ingepland, dus er zijn geen meldingen verstuurd.', 'ok');
+    A.toast(wie.size ? `${titel} verstuurd – ${wie.size} medewerker${wie.size > 1 ? 's' : ''} kreeg${wie.size > 1 ? 'en' : ''} een melding`
+      : `${titel} verstuurd. Er stond nog niemand ingepland, dus er zijn geen meldingen verstuurd.`, 'ok');
     pRooster();
-    if (!alleenFeesten) deelWhatsApp(maand);
+    if (caf) deelWhatsApp(maand);
   }
 
   function siteUrl() {
@@ -1444,17 +1466,17 @@
         <button class="icoon bWeg" style="margin-bottom:.5em" title="verwijderen">✕</button></div>`;
     // reacties-overzicht bij bestaande uitvraag
     let reactieHtml = '';
-    if (!nieuw && e.uitvraag) {
-      const st = uitvraagStand(e);
+    if (!nieuw && (e.uitvraag || ['concept', 'ingepland'].includes(e.status))) {
+      const st = e.uitvraag ? uitvraagStand(e) : { groep: [], reac: [] };
       const regel = m => { const r = st.reac.find(r => r.medewerker_id === m.id);
         const bev = r && r.kan && r.bevestigd_functie;
         const knop = r && r.kan && e.status === 'open' ? (bev ? `<button class="knop klein plat" type="button" data-bev-weg="${r.id}">Intrekken</button>` : `<button class="knop klein ok" type="button" data-bev="${r.id}">Bevestigen</button>`) : '';
         return `<div class="item" style="padding:.35em 0;flex-wrap:wrap"><span class="stip" style="background:${esc(m.kleur)}"></span><b>${esc(m.naam)}</b><span class="rechts">${r ? (bev ? `<span class="label ok">🔒 bevestigd · ${esc(r.bevestigd_functie)}</span>${r.aangeboden ? ` <span class="label let">🔁 ${r.overname_door ? esc(A.mwNaam(r.overname_door)) + ' wil overnemen' : 'aangeboden'}</span>` : ''}` : r.kan ? '<span class="label ok">✓ kan</span>' : '<span class="label fout">✕ kan niet</span>') + ` <small class="zacht">${A.tijdGeleden(r.tijd)}</small>` : '<span class="label">geen reactie</span>'}${knop}</span></div>`; };
       reactieHtml = `<div class="paneel" style="background:#faf6ef;box-shadow:none;padding:.8em 1em">
-        <div class="paneel-kop" style="margin-bottom:.3em"><b>Reacties oproepkrachten</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu indelen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
+        <div class="paneel-kop" style="margin-bottom:.3em"><b>${e.uitvraag ? 'Reacties oproepkrachten' : 'Indeling'}</b>${e.status === 'open' ? '<button class="knop klein primair" id="eNuPlannen" type="button">Nu indelen</button>' : e.status === 'concept' ? '<button class="knop klein ok" id="eVersturen" type="button">📤 Versturen naar personeel</button>' : '<span class="label ok">verstuurd</span>'}</div>
         ${e.status === 'concept' || e.status === 'ingepland' ? indelingHtml(e) : e.status === 'open' ? voorlopigIndelingHtml(e) : ''}
-        ${st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
-        ${e.status === 'concept' || e.status === 'ingepland' ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de oproep gaat weer open. Reacties blijven staan.</small></div>' : ''}
+        ${!e.uitvraag ? '' : st.groep.length ? st.groep.map(regel).join('') : '<p class="zacht">Er zijn geen oproepkrachten met de gevraagde functies.</p>'}
+        ${e.uitvraag && (e.status === 'concept' || e.status === 'ingepland') ? '<div style="margin-top:.6em"><button class="knop klein" id="eTerug" type="button">↩ Inplannen ongedaan maken</button><small class="zacht" style="display:block;margin-top:.3em">De indeling vervalt en de oproep gaat weer open. Reacties blijven staan.</small></div>' : ''}
         ${e.status === 'open' ? '<p class="zacht" style="font-size:.82rem;margin:.4em 0 0">Met "Bevestigen" zet je iemand alvast vast op dit feest; die krijgt meteen een melding en kan het zelf niet meer uitzetten. "Nu indelen" stopt met wachten en deelt het feest meteen in. Wie dan nog niet heeft gereageerd, wordt niet ingepland.</p>' : ''}</div>`;
     }
     const uitvraagHtml = (nieuw || e.status === 'open' || !e.status) ? `
