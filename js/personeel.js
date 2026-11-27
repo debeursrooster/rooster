@@ -252,7 +252,8 @@
         ${concept ? `<p class="zacht" style="font-size:.88rem">Het rooster voor ${esc(A.maandNaam(concept.maand))} wordt nog gemaakt.</p>` : ''}
         ${regels.length ? Object.keys(perMaand).sort().map(m => `<h4 style="text-transform:capitalize;margin:.8em 0 .3em;color:var(--zacht);font-size:.85rem">${esc(A.maandNaam(m))}</h4>${perMaand[m].join('')}`).join('')
           : '<div class="leeg"><span class="groot">🛋️</span>Geen diensten gepland<br><a href="#" id="naarBeschikbaar">Bekijk de beschikbare diensten</a></div>'}
-      </div>`;
+      </div>
+      <p style="text-align:center;font-size:.9rem;margin:1.2em 0 .4em"><a href="handleiding/personeel.html">📖 Hoe werkt de app?</a></p>`;
     const nb = $('#naarBeschikbaar'); if (nb) nb.onclick = e => { e.preventDefault(); tab = 'beschikbaar'; teken(); window.scrollTo(0, 0); };
   }
 

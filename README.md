@@ -99,7 +99,7 @@ Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt
 1. Een medewerker tikt in de app op **🤒 Ziek melden**. Die knop staat bovenaan bij de volgende dienst én onder *Vrij / ziek*. Hij of zij vinkt aan welke diensten vervallen en kiest vanaf wanneer. Er wordt **niet** gevraagd wat iemand heeft; dat mag een werkgever niet vastleggen.
 2. Daarna verschijnt meteen een grote knop **📞 Bel Ricardo** met zijn nummer. Naam en nummer stel je in bij Instellingen.
 3. Ricardo krijgt een melding (en een pushbericht als ntfy is ingesteld). Bij **Aanvragen → Ziek** klikt hij op **Bevestigen** zodra de medewerker heeft gebeld. Per dienst stelt de app een vervanger voor. Kiest hij "open laten", dan krijgen collega's die kunnen een bericht om de dienst op te pakken.
-4. Wie ziek is wordt niet ingeroosterd tot hij of zij zich **beter meldt**. Dat kan de medewerker zelf doen, of Ricardo.
+4. Een ziekmelding zonder einddatum geldt tot het **eind van de maand**; de maand erna wordt iemand gewoon weer ingepland. Beter melden kan de medewerker zelf doen (en belt Ricardo even), of Ricardo. Is iemand langer ziek, dan vinkt Ricardo bij **Personeel** *🤒 Langdurig ziek* aan: dan wordt die persoon niet ingeroosterd en krijgt geen oproepen tot het weer uit staat. Collega's zien dit niet. Opslaan kan pas na `update-1.9.15.sql` (Supabase-pakket).
 5. Belt iemand liever? Dan zet Ricardo het er zelf in met **🤒 Iemand belde: ziek** (op het Overzicht, bij Verzuim en bij Aanvragen → Ziek). Hij vult in hoe laat er gebeld werd; dat telt mee voor "hoe kort van tevoren".
 6. Onder **Verzuim** staat per medewerker over de afgelopen 12 maanden: aantal meldingen, ziektedagen, gemiste diensten en hoe lang van tevoren er gemiddeld is gemeld. Er staan signalen bij, zoals *gesprek aanbevolen*, *vaak kort van tevoren* of *vaak op zondag*. Klik op een naam om de geschiedenis te zien en gesprekken en afspraken vast te leggen.
 
@@ -130,6 +130,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 **Reageren t/m voor de hele maand.** Lopen er oproepen in een maand, dan staat bovenaan die maand bij **Zalencentrum** de knop **⏳ Reageren t/m aanpassen**. Kies één datum en die geldt voor alle feesten van die maand waarvoor de oproep nog loopt. Ligt een feest te dichtbij, dan wordt voor dat feest automatisch 2 dagen ervoor genomen.
 
 **Beschikbaar op de telefoon.** Bovenaan staan snelknoppen (🎉 Kun jij? · 🙋 Open diensten · ☕ Cafetaria) met het aantal; tik erop en je springt naar dat stuk. Heeft iemand nog niet op een feest gereageerd, dan staat *Kun jij op deze feesten?* bovenaan. Open diensten staan per feest (of per dag in de cafetaria) bij elkaar, met per functie één regel en een knop Oppakken, bijv. *3× Bar zaal*.
+
+**Handleidingen.** In de map `handleiding` staan twee handleidingen met schermafbeeldingen: `ricardo.html` (beheer; link *📖 Handleiding* onderaan de linkerbalk) en `personeel.html` (link *📖 Hoe werkt de app?* op het inlogscherm en onder Mijn diensten). Ze zijn ook af te drukken.
 
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.

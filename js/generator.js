@@ -126,7 +126,7 @@
   // Wie moet er reageren op een uitvraag? Oproepkrachten die in de zalen werken en een gevraagde functie hebben
   G.uitvraagGroep = function (e, data) {
     const fns = new Set((e.bezetting || []).map(b => b.functie));
-    return (data.medewerkers || []).filter(m => m.actief !== false && G.isOproep(m) && (m.locaties || []).includes('zalen') && (m.functies || []).some(f => fns.has(f)));
+    return (data.medewerkers || []).filter(m => m.actief !== false && !m.langdurig_ziek && G.isOproep(m) && (m.locaties || []).includes('zalen') && (m.functies || []).some(f => fns.has(f)));
   };
 
   // ---------- instellingen van de planner ----------
@@ -229,7 +229,11 @@
     if ((m.vrije_dagen || []).map(Number).includes(wd)) return { ok: false, reden: 'vaste vrije dag' };
     const vl = ctx.verlof.find(v => v.medewerker_id === m.id && v.van <= slot.datum && v.tot >= slot.datum && v.status === 'goedgekeurd');
     if (vl) return { ok: false, reden: 'vrij (goedgekeurd)' };
-    if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && (!z.tot || z.tot >= slot.datum))) return { ok: false, reden: 'ziek gemeld' };
+    if (m.langdurig_ziek) return { ok: false, reden: 'langdurig ziek' };
+    // Een ziekmelding zonder einddatum geldt tot het eind van de maand (van de melding, of van nu als die al loopt).
+    // De maand erna wordt iemand gewoon weer ingepland; wie langer ziek is, zet de baas op 'langdurig ziek'.
+    if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && slot.datum <= (z.tot || G.lastDay(G.monthOf(z.van > G.today() ? z.van : G.today())))))
+      return { ok: false, reden: 'ziek gemeld' };
     const ob = ctx.onbeschikbaar.find(b => b.medewerker_id === m.id && b.datum === slot.datum && onbeschikbaarDeel(b.deel, slot));
     if (ob) return { ok: false, reden: 'heeft aangegeven niet te kunnen' };
     // Cafetaria in twee rondes: eerst alleen vaste krachten, daarna oproepkrachten die 'Ik kan' zeiden
