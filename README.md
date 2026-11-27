@@ -121,6 +121,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Versturen volgt het tabblad.** Bij **Rooster** kies je bovenaan *Alles*, *Cafetaria* of *Zalen*; de groene knop doet precies dat: **📤 Alles versturen**, **📤 Cafetaria versturen** of **📤 Zalencentrum versturen**. Zo kun je de cafetaria en het zalencentrum los van elkaar versturen. Terugtrekken werkt op dezelfde manier: **↩︎ Cafetaria terugtrekken**, **↩︎ Zalencentrum terugtrekken** of **↩︎ Alles terugtrekken**. Het personeel ziet het dan niet meer tot je opnieuw verstuurt; de indeling blijft staan en er gaan geen meldingen uit. Loopt de oproep voor een feest nog, dan wordt het eerst ingedeeld met de reacties die er zijn. Iedereen die is ingepland krijgt een melding. Plekken van Ricardo met "Personeel mag overnemen" blijven open voor wie toch kan.
 
+**Te doen houdt ze ook apart.** Is het zalencentrum al verstuurd, dan staat bij *Te doen* "Cafetariarooster … nakijken en versturen" en kom je met één tik op het cafetaria-tabblad. Verstuurde feesten met nog open plekken staan er elk apart (bijv. "Oud en nieuw (do 31 dec): 10 plekken open"); tik erop om het feest meteen in te vullen. Bij **Zalencentrum** staat per maand de status van de feesten zelf (verstuurd / nog niet verstuurd), los van de cafetaria.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.

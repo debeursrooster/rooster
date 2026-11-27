@@ -143,7 +143,7 @@
     const genDatum = G.generatieDatum(volgende, d.instellingen.dagen_voor_einde);
     const roosterRegel = !rv ? (pl.aan && pl.voorlopig >= nu ? `wordt vanzelf gemaakt vanaf ${A.datumLang(pl.voorlopig)}` : `wordt vanzelf gemaakt op ${A.datumLang(genDatum)}`)
       : rv.status === 'voorlopig' ? `personeel geeft door wat ze kunnen · klaar op ${A.datumLang(pl.definitief)}`
-      : rv.status === 'concept' ? 'klaar – kijk het na en verstuur het' : 'verstuurd naar het personeel';
+      : rv.status === 'concept' ? (feestenNogNietVerstuurd(volgende).length ? 'klaar – kijk het na en verstuur het' : 'zalencentrum verstuurd · cafetaria klaar – kijk het na en verstuur het') : 'verstuurd naar het personeel';
 
     // ---- Nog in te vullen: komende 14 dagen / 1 maand / 2 maanden / alles (keuze wordt onthouden) ----
     const BEREIK = { '14': ['14 dagen', 14], '31': ['1 maand', 31], '62': ['2 maanden', 62], 'alles': ['Alles', 3650] };
@@ -178,9 +178,24 @@
     if (urgent) taken.push(['#nogOpen', '🔴', `${urgent} open plek${urgent > 1 ? 'ken' : ''} in de komende 3 dagen`, 'zie de lijst hieronder', 'fout']);
     if (verlofOpen.length) taken.push(['aanvragen/verlof', '🌴', `${verlofOpen.length} vrij-aanvra${verlofOpen.length > 1 ? 'gen' : 'ag'} beslissen`, verlofOpen.map(v => A.mwNaam(v.medewerker_id)).join(', '), 'let']);
     if (ruilOpen) taken.push(['aanvragen/ruil', '🔁', `${ruilOpen} ruil${ruilOpen > 1 ? 'en' : ''} goedkeuren`, 'beide collega\'s zijn al akkoord', 'let']);
-    for (const r of d.roosters.filter(r => r.status === 'concept')) taken.push(['rooster', '📅', `Rooster ${A.maandNaam(r.maand)} nakijken en versturen`, 'het personeel ziet het pas als jij op Versturen drukt', 'ok', r.maand]);
+    for (const r of d.roosters.filter(r => r.status === 'concept')) {
+      // Zalencentrum al verstuurd? Dan gaat het alleen nog om de cafetaria → meteen naar het cafetaria-tabblad
+      const zalenKlaar = !feestenNogNietVerstuurd(r.maand).length;
+      const cafOpen = d.diensten.filter(x => x.maand === r.maand && x.locatie === 'cafetaria' && !x.medewerker_id).length;
+      taken.push(['rooster', '📅', `${zalenKlaar ? 'Cafetariarooster' : 'Rooster'} ${A.maandNaam(r.maand)} nakijken en versturen`,
+        (zalenKlaar ? 'zalencentrum is al verstuurd · ' : '') + (cafOpen ? cafOpen + ' cafetariadiensten nog open · ' : '') + 'het personeel ziet het pas als jij op Versturen drukt', 'ok', r.maand, zalenKlaar ? 'cafetaria' : 'alle']);
+    }
     const evConcept = d.zalen_events.filter(e => e.status === 'concept');
     if (evConcept.length) taken.push(['zalen', '🎉', `${evConcept.length} feest${evConcept.length > 1 ? 'en' : ''} nakijken en versturen`, evConcept.map(e => e.naam).join(', '), 'ok']);
+    // Verstuurde feesten met nog open plekken: elk feest apart, zodat je ze los kunt invullen
+    for (const e of d.zalen_events.filter(e => e.datum >= nu && (e.status === 'ingepland' || (!e.status && A.isGepubliceerd(G.monthOf(e.datum))))).sort((a, b) => a.datum.localeCompare(b.datum))) {
+      const ds = d.diensten.filter(x => x.event_id === e.id), leeg = ds.filter(x => !x.medewerker_id);
+      if (!leeg.length) continue;
+      const perFn = {}; for (const x of leeg) perFn[x.functie] = (perFn[x.functie] || 0) + 1;
+      const dagen = Math.round((G.parse(e.datum) - G.parse(nu)) / 864e5);
+      taken.push(['zalen', '🎉', `${e.naam} (${A.datumKort(e.datum)}): ${leeg.length} plek${leeg.length > 1 ? 'ken' : ''} open`,
+        Object.entries(perFn).map(([f, n]) => n + '× ' + f).join(', ') + ' · staat open in de app, personeel kan reageren', dagen <= 7 ? 'fout' : 'let', '', '', e.id]);
+    }
     const opletten = actieveMw().map(m => ({ m, st: personeelStats(m) })).filter(x => x.st.let.length);
 
     hoofd.innerHTML = `
@@ -188,7 +203,7 @@
       <div class="kop"><div><h1>Goedendag${d.instellingen.beheer_naam ? ' ' + esc(d.instellingen.beheer_naam) : ''} 👋</h1><span class="zacht">${esc(A.datumLang(nu))}</span></div>
         <div class="acties"><button class="knop" id="oZiek" type="button">🤒 Iemand belde: ziek</button><button class="knop" id="oBericht" type="button">🔔 Bericht aan personeel</button><a class="knop" href="#zalen">+ Feest</a></div></div>
       <div class="paneel taken"><div class="paneel-kop"><h3>✅ Te doen</h3></div>
-        ${taken.length ? taken.map(([ga, ic, wat, sub, kl, maand]) => `<a class="taak ${kl}" href="${ga.startsWith('#') ? ga : '#' + ga}" ${maand ? `data-maand="${maand}"` : ''}><span class="taak-ic">${ic}</span><span class="taak-tekst"><b>${esc(wat)}</b><small>${esc(sub)}</small></span><span class="taak-pijl">›</span></a>`).join('')
+        ${taken.length ? taken.map(([ga, ic, wat, sub, kl, maand, loc, ev]) => `<a class="taak ${kl}" href="${ga.startsWith('#') ? ga : '#' + ga}" ${maand ? `data-maand="${maand}"` : ''} ${loc ? `data-loc="${loc}"` : ''} ${ev ? `data-taakev="${ev}"` : ''}><span class="taak-ic">${ic}</span><span class="taak-tekst"><b>${esc(wat)}</b><small>${esc(sub)}</small></span><span class="taak-pijl">›</span></a>`).join('')
           : '<div class="leeg"><span class="groot">🎉</span>Niets te doen. Alles is geregeld!</div>'}
       </div>
       <div class="paneel" id="nogOpen"><div class="paneel-kop" style="flex-wrap:wrap;gap:.5em"><h3>Nog in te vullen${bereik === 'alles' ? '' : ' · komende ' + BEREIK[bereik][0]}</h3>
@@ -214,7 +229,8 @@
         ${(() => { const ms = d.meldingen.filter(m => !m.medewerker_id).sort((a, b) => (b.tijd || '').localeCompare(a.tijd || '')).slice(0, 10);
           return ms.length ? ms.map(m => `<div class="item ${m.gelezen ? '' : 'ongelezen'}"><div><div class="tekst">${esc(m.tekst)}</div><div class="meta">${A.tijdGeleden(m.tijd)}</div></div></div>`).join('') : '<div class="leeg">Geen meldingen</div>'; })()}
       </details>`;
-    hoofd.querySelectorAll('[data-maand]').forEach(a => a.addEventListener('click', () => { staat.maand = a.dataset.maand; }));
+    hoofd.querySelectorAll('[data-maand]').forEach(a => a.addEventListener('click', () => { staat.maand = a.dataset.maand; if (a.dataset.loc) staat.loc = a.dataset.loc; }));
+    hoofd.querySelectorAll('[data-taakev]').forEach(a => a.addEventListener('click', ev => { ev.preventDefault(); eventModal(A.event(a.dataset.taakev)); }));
     hoofd.querySelectorAll('a.taak[href^="#aanvragen/"]').forEach(a => a.addEventListener('click', () => { staat.aanvraagTab = a.getAttribute('href').split('/')[1]; }));
     hoofd.querySelectorAll('#openBereik [data-b]').forEach(b => b.onclick = () => {
       try { localStorage.setItem('rooster_open_bereik', b.dataset.b); } catch (x) { }
@@ -1434,7 +1450,10 @@
         <button class="knop primair" id="nieuwEv">+ Feest toevoegen</button></div></div>
       <p class="zacht">Zet hier alle feesten in. Met <b>oproepkrachten vragen</b> krijgen de oproepkrachten een melding en ${esc(A.data.instellingen.uitvraag_dagen || 7)} dagen om te laten weten of ze kunnen. Daarna wordt het feest automatisch ingepland: eerst vast personeel (tot hun contracturen), daarna de oproepkrachten eerlijk verdeeld.</p>
       <p class="zacht uv-legenda"><span class="uv-fn ok">groen</span> genoeg oproepkrachten kunnen · <span class="uv-fn let">oranje</span> nog mensen nodig · <span class="uv-fn fout">rood</span> niemand kan · grijs: nog geen reacties. <span style="opacity:.8">(Vast personeel komt daar bij het inplannen nog bij.)</span></p>
-      ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${A.rooster(m) ? `<span class="label ${A.isGepubliceerd(m) ? 'ok' : 'let'}">rooster ${A.isGepubliceerd(m) ? "verstuurd" : "nog niet verstuurd"}</span>` : '<span class="label">nog geen maandrooster</span>'}</div>
+      ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${(() => { // status van het zalencentrum zelf (los van de cafetaria)
+          const niet = feestenNogNietVerstuurd(m).length;
+          const verst = perMaand[m].some(e => e.status === 'ingepland' || (!e.status && A.isGepubliceerd(m) && A.data.diensten.some(x => x.event_id === e.id)));
+          return niet ? `<span class="label let">${niet} feest${niet > 1 ? 'en' : ''} nog niet verstuurd</span>` : verst ? '<span class="label ok">zalencentrum verstuurd</span>' : '<span class="label">nog niet ingepland</span>'; })()}</div>
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
           const uv = e.status === 'open' ? uitvraagOverzicht(e) : null;
           const status = uv ? uv.rechts : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
