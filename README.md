@@ -123,6 +123,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Te doen houdt ze ook apart.** Is het zalencentrum al verstuurd, dan staat bij *Te doen* "Cafetariarooster … nakijken en versturen" en kom je met één tik op het cafetaria-tabblad. Verstuurde feesten met nog open plekken staan er elk apart (bijv. "Oud en nieuw (do 31 dec): 10 plekken open"); tik erop om het feest meteen in te vullen. Bij **Zalencentrum** staat per maand de status van de feesten zelf (verstuurd / nog niet verstuurd), los van de cafetaria.
 
+**Nog in te vullen** toont per dag één regel (cafetaria of het feest) met de open plekken als knopjes, bijv. *Keuken 10:00–16:00*, *2× Frituur 17:00–19:00*. Tik op een knopje om iemand in te vullen; daar zie je wie de functie heeft en vrij is. Een rood knopje betekent: niemand van het personeel heeft die functie en is vrij.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.

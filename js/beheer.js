@@ -149,21 +149,30 @@
     const BEREIK = { '14': ['14 dagen', 14], '31': ['1 maand', 31], '62': ['2 maanden', 62], 'alles': ['Alles', 3650] };
     let bereik = '14'; try { const b = localStorage.getItem('rooster_open_bereik'); if (BEREIK[b]) bereik = b; } catch (x) { }
     const tot = G.addDays(nu, BEREIK[bereik][1]);
-    const open = groepOpen(d.diensten.filter(x => !x.medewerker_id && x.datum >= nu && x.datum <= tot)
-      .sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start)));
+    const openLijst = d.diensten.filter(x => !x.medewerker_id && x.datum >= nu && x.datum <= tot)
+      .sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start) || (a.functie || '').localeCompare(b.functie || ''));
+    // Per dag één regel per plek (cafetaria of feest), met de open plekken als knopjes
+    const open = []; { const perDag = new Map();
+      for (const x of openLijst) { const k = x.datum + '|' + (x.event_id || x.locatie);
+        if (!perDag.has(k)) { const g = { x, n: 0, lijst: [] }; perDag.set(k, g); open.push(g); }
+        const g = perDag.get(k); g.n++; g.lijst.push(x); } }
     const vlo = groepOpen(vlOpen(nu).filter(x => x.datum <= tot));
     const wanneer = dag => { const n = Math.round((G.parse(dag) - G.parse(nu)) / 864e5);
       return n === 0 ? '<span class="label fout">vandaag</span>' : n === 1 ? '<span class="label fout">morgen</span>' : n <= 3 ? `<span class="label fout">over ${n} dagen</span>` : n <= 7 ? `<span class="label let">over ${n} dagen</span>` : `<span class="label">over ${n} dagen</span>`; };
-    const wieKan = x => { const ctx = G.context(d, d.diensten.filter(y => y.id !== x.id));
-      return G.kandidaten(ctx, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.actief !== false).map(k => k.m); };
-    const openRij = ({ x, n, ids }) => {
-      const e = x.event_id && A.event(x.event_id), kan = wieKan(x);
+    const ctxOpen = G.context(d, d.diensten);
+    const wieKan = x => G.kandidaten(ctxOpen, { ...x, medewerker_id: null }, { negeerUitvraag: true }).filter(k => k.ok && k.m.actief !== false).map(k => k.m);
+    const openRij = ({ x, n, lijst }) => {
+      const e = x.event_id && A.event(x.event_id);
       const zichtbaarVoorPersoneel = A.dienstZichtbaar(x) || (e && e.status === 'concept');
-      return `<div class="item klik" data-open="${x.id}" style="cursor:pointer"><div class="datumblok ${x.locatie}"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div>
-        <div style="min-width:0"><div class="wie">${n > 1 ? n + '× ' : ''}${esc(x.functie)} · ${tijd(x)}</div>
-          <div class="meta">${e ? '🎉 ' + esc(e.naam) : A.LOC[x.locatie]} · ${zichtbaarVoorPersoneel ? 'staat open in de app, personeel kan hem oppakken' : 'rooster nog niet verstuurd'}</div>
-          <div class="meta">${kan.length ? `👥 Kan: ${kan.slice(0, 4).map(m => esc(m.naam)).join(', ')}${kan.length > 4 ? ' en nog ' + (kan.length - 4) : ''}` : '<b style="color:var(--fout)">Niemand van het personeel kan</b>'}</div></div>
-        <div class="rechts">${wanneer(x.datum)} <button class="knop klein primair" type="button">Invullen</button></div></div>`; };
+      // zelfde functie + tijd op deze dag samen (2× Frituur 17:00–19:00)
+      const stukjes = groepOpen(lijst).map(g => ({ ...g, kan: wieKan(g.x) }));
+      const niemand = stukjes.filter(g => !g.kan.length).reduce((t, g) => t + g.n, 0);
+      return `<div class="item open-dag"><div class="datumblok ${x.locatie}"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div>
+        <div style="min-width:0"><div class="wie">${e ? '🎉 ' + esc(e.naam) : A.LOC[x.locatie]} · ${n} plek${n > 1 ? 'ken' : ''} open</div>
+          <div class="meta">${zichtbaarVoorPersoneel ? 'staat open in de app, personeel kan hem oppakken' : 'rooster nog niet verstuurd'}${niemand ? ` · <b style="color:var(--fout)">${niemand}× niemand die het kan</b>` : ''}</div>
+          <div class="open-plekken">${stukjes.map(g => `<button type="button" class="open-plek ${g.kan.length ? '' : 'niemand'}" data-open="${g.x.id}" title="${g.kan.length ? 'Heeft deze functie en is vrij: ' + esc(g.kan.map(m => m.naam).join(', ')) : 'Niemand van het personeel heeft deze functie en is vrij'}">${g.n > 1 ? g.n + '× ' : ''}${esc(g.x.functie)} <small>${tijd(g.x)}</small></button>`).join('')}</div>
+          <div class="meta zacht">Tik op een plek om iemand in te vullen</div></div>
+        <div class="rechts">${wanneer(x.datum)}</div></div>`; };
     const vlRij = ({ x, n }) => { const e = A.event(x.event_id), st = uitvraagStand(e);
       return `<div class="item klik" data-uvev="${e.id}" style="cursor:pointer"><div class="datumblok zalen"><b>${G.parse(x.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(x.datum)]}</small></div>
         <div style="min-width:0"><div class="wie">${n > 1 ? n + '× ' : ''}${esc(x.functie)} · ${tijd(x)}</div>
@@ -721,7 +730,7 @@
     const uit = [], open = new Map();
     for (const x of lijst) {
       if (x.medewerker_id) { uit.push({ x, n: 1, ids: [x.id] }); continue; }
-      const k = [x.event_id || '', x.locatie, x.functie, x.start, x.eind].join('|');
+      const k = [x.datum, x.event_id || '', x.locatie, x.functie, x.start, x.eind].join('|');
       if (open.has(k)) { open.get(k).n++; open.get(k).ids.push(x.id); }
       else { const g = { x, n: 1, ids: [x.id] }; open.set(k, g); uit.push(g); }
     }
