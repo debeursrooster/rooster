@@ -488,3 +488,20 @@ details.paneel[open] > summary::before { content: '▾'; }
 .fn-ook-rij { display: flex; flex-wrap: wrap; align-items: center; gap: .4em .6em; padding: .45em 0; border-top: 1px solid var(--lijn); }
 .fn-ook-rij > b { min-width: 7.5em; }
 .fn-ook-rij .chips { gap: .3em; }
+
+/* ---- Indeling feest: per persoon eigen tijden ---- */
+.indeling-namen.met-tijd { flex-direction: column; flex-wrap: nowrap; gap: .3em; flex: 1; min-width: 0; }
+.ind-plek { display: flex; align-items: center; justify-content: space-between; gap: .5em; flex-wrap: wrap; padding: .15em .3em; border-radius: 10px; }
+.ind-plek.afwijkend { background: #fff7e6; }
+.ind-tijd { display: inline-flex; align-items: center; gap: .3em; white-space: nowrap; }
+.ind-tijd input[type=time] { width: 7.8em; padding: .2em .35em; font-size: .85rem; min-height: 0; }
+.ind-plek.afwijkend .ind-tijd input { border-color: var(--let); font-weight: 700; }
+
+/* ---- Cafetaria: mensen per uur + snel invullen ---- */
+.uurbalk { display: flex; align-items: flex-end; gap: 2px; height: 70px; margin: .3em 0 .5em; padding-top: 14px; }
+.uurbalk .uur { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; position: relative; }
+.uurbalk .uur i { display: block; width: 100%; background: var(--caf, #e07a2f); border-radius: 3px 3px 0 0; min-height: 2px; opacity: .85; }
+.uurbalk .uur small { font-size: .6rem; color: var(--zacht); line-height: 1.3; }
+.uurbalk .uur-n { font-size: .65rem; font-weight: 700; color: var(--inkt); line-height: 1; margin-bottom: 1px; }
+.snel-tabel input { width: 4.5em; padding: .25em .4em; }
+.snel-voorbeeld { background: #faf6ef; border-radius: 10px; padding: .6em .8em; margin: .4em 0; }

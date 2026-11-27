@@ -106,6 +106,14 @@ Lukt het niet om een dienst in te vullen, dan blijft hij **open** (rood) en komt
 ### Functies die bij elkaar horen
 Bij **Instellingen → Functies → Wie dit kan, kan ook…** zet je bijvoorbeeld: wie *Bar zaal* kan, kan ook *Bar boven*. Dan hoef je dat niet bij iedere medewerker apart aan te vinken. De planner, de oproepen voor feesten en cafetaria, het oppakken van open diensten en het ruilen nemen het vanzelf mee. Bij de medewerker staat het grijs achter de eigen functies ("+ Bar boven"). Wat je bij de medewerker zelf aanvinkt, blijft gewoon staan. Opslaan in Supabase kan pas nadat `beveiliging.sql` (Supabase-pakket) is uitgevoerd.
 
+### Cafetaria: openingstijden en spits
+Bij **Cafetaria → ⚡ Snel invullen** kies je de dagen (bv. di t/m vr), de openingstijd (10:00–20:00), wanneer de dienst wisselt (bv. 15:00; leeg = één lange dienst) en de spits (bv. 17:00–20:00). Per functie vul je in hoeveel mensen er normaal staan en hoeveel er extra bij komen in de spits. De app maakt dan alle vaste diensten voor die dagen in één keer (bestaande diensten op die dagen worden vervangen). Doe het daarna nog een keer voor dagen met een andere openingstijd, zoals za en zo (11:00–20:00). Maandag dicht = maandag niet aanvinken.
+Per dag staat een balkje met het aantal mensen per uur; de drukste uren zijn feller gekleurd. Losse diensten aanpassen kan nog steeds door erop te klikken.
+
+### Eigen tijden per persoon bij een feest
+Open een feest bij **Zalencentrum**. In de indeling staat bij elke persoon de begin- en eindtijd (standaard de feesttijden). Begint iemand later, mag iemand eerder weg of was iemand te laat? Pas de tijd daar aan; hij wordt meteen opgeslagen en telt mee bij **Rooster → Uren** en in de Excel-export. Afwijkende tijden zijn oranje gemarkeerd. Is het feest al verstuurd en ligt de dienst nog in de toekomst, dan krijgt de medewerker een melding van de nieuwe tijd. Achteraf aanpassen (gewerkte tijd) gaat zonder melding.
+Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan wordt de indeling opnieuw gemaakt en gaan de eigen tijden verloren (de app waarschuwt daarvoor).
+
 ### Overzicht en personeelskaart
 - Het **Overzicht** begint met een **takenlijst**: wat Ricardo nu moet doen (ziekmeldingen, vrij-aanvragen, ruilen, rooster of feesten nakijken, open plekken in de komende 3 dagen). Daaronder **Nog in te vullen · komende 14 dagen**: per open plek wanneer, wie hem zou kunnen doen, of hoeveel oproepkrachten gereageerd hebben, met een knop *Invullen*.
 - Bij **Personeel** heeft iedereen een **kaart**: uren t.o.v. contract, gewerkte diensten, hoe vaak ziek (en hoe kort van tevoren), hoe vaak hij of zij reageert op oproepen en hoe snel, open diensten opgepakt, ruilen, vrije dagen. Bovenaan staat een korte samenvatting (👍 goed / ⚠️ let op). In de personeelslijst en op het Overzicht staat wie aandacht nodig heeft.

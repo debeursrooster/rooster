@@ -459,14 +459,20 @@
         <span class="label ${open ? 'fout' : baas ? 'let' : 'ok'}">${ds.length - open - baas} van ${ds.length} personeel${baas ? ` · ${baas}× ${esc(beheerNaam())}` : ''}${open ? ` · ${open} open` : ''}</span></div>
       ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
-          <div class="indeling-namen">${rij.map(x => { const m = A.mw(x.medewerker_id);
+          <div class="indeling-namen${wijzig ? ' met-tijd' : ''}">${rij.map(x => { const m = A.mw(x.medewerker_id);
             const attr = wijzig ? ` data-wissel="${x.id}" role="button" tabindex="0" title="Klik om iemand anders op deze plek te zetten"` : '';
-            return m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? (G.baasOverneembaar(x, e) ? '⭐ ' : '⭐🔒 ') : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
-                     : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
+            const chip = m ? `<span class="indeling-naam${wijzig ? ' klik' : ''}${A.isBeheer(m) ? ' baas' : ''}"${attr}>${A.isBeheer(m) ? (G.baasOverneembaar(x, e) ? '⭐ ' : '⭐🔒 ') : `<span class="stip" style="background:${esc(m.kleur)}"></span>`}${esc(m.naam)}${tijd(x)}${dubbelIds.has(x.id) ? ' <span title="Staat op meerdere plekken tegelijk">2×</span>' : ''}${wijzig ? ` <span class="potlood">✎</span><button type="button" class="chip-weg" data-leeg="${x.id}" title="${esc(m.naam)} van deze plek halen" aria-label="${esc(m.naam)} van deze plek halen">✕</button>` : ''}</span>`
+                     : `<span class="indeling-naam open${wijzig ? ' klik' : ''}"${attr}>Open${tijd(x)}${wijzig ? ' <span class="potlood">＋</span>' : ''}</span>`;
+            if (!wijzig) return chip;
+            // eigen begin- en eindtijd per persoon (bv. later beginnen, of te laat gekomen): telt mee in de uren
+            const afw = x.start !== e.start || x.eind !== e.eind;
+            return `<div class="ind-plek${afw ? ' afwijkend' : ''}">${chip.replace(tijd(x), '')}
+              <span class="ind-tijd"><input type="time" data-tstart="${x.id}" value="${esc(x.start)}" aria-label="Begintijd"> – <input type="time" data-teind="${x.id}" value="${esc(x.eind)}" aria-label="Eindtijd">
+              <small class="zacht" data-turen="${x.id}">${A.uren(G.hours(x.start, x.eind))} u</small></span></div>`; }).join('')}</div></div>`; }).join('')}
       ${baas ? `<div class="baas-over">${[...new Set(ds.filter(x => A.beheerPlek(x)).map(x => x.functie))].map(f => { const mag = G.baasOverneembaar({ functie: f }, e);
           return `<div class="baas-over-rij"><span>⭐ <b>${esc(f)}</b></span><label class="check"><input type="checkbox" data-baasfn="${esc(f)}" ${mag ? 'checked' : ''}> Personeel mag overnemen</label></div>`; }).join('')}
         <p class="zacht" style="font-size:.8rem;margin:.3em 0 0">⭐ = ${esc(beheerNaam())} zelf. Met een vinkje blijft de plek open staan voor het personeel: wie toch kan, kan hem oppakken. Zonder vinkje (🔒) houd je de plek zelf.</p></div>` : ''}
-      ${wijzig ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. ${e.status === 'ingepland' ? 'Het is al verstuurd: wie erbij komt, eraf gaat of een andere taak krijgt, krijgt meteen een melding.' : 'Pas na "Versturen naar personeel" krijgt iedereen een melding.'}</p>` : ''}
+      ${wijzig ? `<p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Klik op een naam of op Open om te schuiven, of op ✕ om iemand van de plek te halen. Pas de tijden aan als iemand later begint, eerder weg mag of te laat was; die tijden tellen mee in de uren (Rooster → Uren). ${e.status === 'ingepland' ? 'Het is al verstuurd: wie erbij komt, eraf gaat of een andere taak krijgt, krijgt meteen een melding.' : 'Pas na "Versturen naar personeel" krijgt iedereen een melding.'}</p>` : ''}
     </div>`;
   }
 
@@ -1600,6 +1606,21 @@
         await A.melding(m.id, `De bevestiging voor ${omschr(ev0)} is ingetrokken. Je opgave "Ik kan" blijft staan; na de termijn wordt het werk verdeeld.`);
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
       }));
+      // eigen tijden per persoon opslaan
+      bg.querySelectorAll('[data-tstart], [data-teind]').forEach(inp => inp.onchange = () => A.bezig(null, async () => {
+        const id = inp.dataset.tstart || inp.dataset.teind, d = A.data.diensten.find(x => x.id === id); if (!d || !inp.value) return;
+        const veld = inp.dataset.tstart ? 'start' : 'eind'; if (d[veld] === inp.value) return;
+        const oud = d.start + '–' + d.eind;
+        await Store.update('diensten', d.id, { [veld]: inp.value }); d[veld] = inp.value;
+        const ev0 = A.event(e.id), rij = inp.closest('.ind-plek');
+        bg.querySelector(`[data-turen="${id}"]`).textContent = A.uren(G.hours(d.start, d.eind)) + ' u';
+        if (rij) rij.classList.toggle('afwijkend', d.start !== ev0.start || d.eind !== ev0.eind);
+        // al verstuurd en nog niet geweest: de medewerker krijgt bericht. Achteraf (gewerkte tijd) niet.
+        const m = A.mw(d.medewerker_id), toekomst = new Date(d.datum + 'T' + (veld === 'start' ? inp.value : d.start) + ':00') > new Date();
+        if (ev0.status === 'ingepland' && m && m.actief !== false && toekomst)
+          await A.melding(m.id, `🕒 Je tijd bij ${ev0.naam} op ${A.datumLang(d.datum)} is gewijzigd: nu ${d.start}–${d.eind} (was ${oud}).`, { titel: 'Tijd gewijzigd' });
+        A.toast(`${m ? m.naam : 'Plek'}: ${d.start}–${d.eind} (${A.uren(G.hours(d.start, d.eind))} uur) opgeslagen${ev0.status === 'ingepland' && m && m.actief !== false && toekomst ? ' – melding verstuurd' : ''}`, 'ok');
+      }));
       bg.querySelectorAll('[data-leeg]').forEach(k => k.onclick = async ev2 => {
         ev2.stopPropagation();
         const d = A.data.diensten.find(x => x.id === k.dataset.leeg); if (!d) return;
@@ -1750,12 +1771,13 @@
   function pCafetaria() {
     const d = A.data, nu = G.today();
     const sl = d.sluitingsdagen.filter(s => s.datum >= G.addDays(nu, -1)).sort((a, b) => a.datum.localeCompare(b.datum));
-    hoofd.innerHTML = `<div class="kop"><h1>Cafetaria</h1></div>
-      <p class="zacht">Vaste diensten per weekdag. Dit is de basis voor elk nieuw rooster. Wijzigingen gelden voor roosters die je hierna maakt.</p>
+    hoofd.innerHTML = `<div class="kop"><h1>Cafetaria</h1><div class="acties"><button class="knop primair" id="cafSnel" type="button">⚡ Snel invullen</button></div></div>
+      <p class="zacht">Vaste diensten per weekdag. Dit is de basis voor elk nieuw rooster. Wijzigingen gelden voor roosters die je hierna maakt. Met <b>⚡ Snel invullen</b> zet je in één keer de openingstijden en de spits (meer mensen) voor een aantal dagen.</p>
       <div class="rij" style="grid-template-columns:repeat(auto-fill,minmax(270px,1fr));align-items:start">
       ${A.DAGEN.map((dag, wd) => { const ds = d.cafetaria_diensten.filter(c => +c.weekdag === wd).sort((a, b) => G.min(a.start) - G.min(b.start) || a.functie.localeCompare(b.functie));
         const uren = ds.reduce((s, c) => s + G.hours(c.start, c.eind) * c.aantal, 0);
         return `<div class="paneel" style="margin:0"><div class="paneel-kop"><h3 style="text-transform:capitalize">${dag}</h3><span class="zacht" style="font-size:.85rem">${ds.length ? A.uren(uren) + ' uur' : 'gesloten'}</span></div>
+          ${uurBalk(ds)}
           ${ds.map(c => `<div class="item klik" data-c="${c.id}" style="cursor:pointer;padding:.5em 0"><b style="font-variant-numeric:tabular-nums">${esc(c.start)}–${esc(c.eind)}</b><span>${esc(c.functie)}</span><span class="rechts"><span class="label caf">${c.aantal}×</span></span></div>`).join('') || '<div class="zacht" style="padding:.5em 0">Gesloten</div>'}
           <div style="margin-top:.6em;display:flex;gap:.4em"><button class="knop klein" data-nieuw="${wd}">+ Dienst</button>${ds.length ? `<button class="knop klein plat" data-kopie="${wd}">Kopiëren naar…</button>` : ''}</div></div>`; }).join('')}
       </div>
@@ -1765,6 +1787,7 @@
     hoofd.querySelectorAll('[data-c]').forEach(x => x.onclick = () => cafModal(d.cafetaria_diensten.find(c => c.id === x.dataset.c)));
     hoofd.querySelectorAll('[data-nieuw]').forEach(x => x.onclick = () => cafModal(null, +x.dataset.nieuw));
     hoofd.querySelectorAll('[data-kopie]').forEach(x => x.onclick = () => kopieerDag(+x.dataset.kopie));
+    $('#cafSnel').onclick = () => cafSnelInvullen();
     hoofd.querySelectorAll('[data-sweg]').forEach(x => x.onclick = async () => { await Store.remove('sluitingsdagen', x.dataset.sweg); await herlaad(); pCafetaria(); });
     $('#nieuwSluit').onclick = async () => {
       const res = await A.modal('Sluitingsdag toevoegen', `<div class="rij"><div class="veld"><label>Van</label><input type="date" id="sVan" value="${nu}"></div><div class="veld"><label>Tot en met</label><input type="date" id="sTot" value="${nu}"></div></div><div class="veld"><label>Reden</label><input id="sReden" placeholder="bv. Tweede Paasdag"></div>`,
@@ -1779,6 +1802,64 @@
       }
       await herlaad(); pCafetaria();
     };
+  }
+
+  // Hoeveel mensen staan er per uur? Klein balkje per dag, zodat je de spits meteen ziet
+  function uurBalk(ds) {
+    if (!ds.length) return '';
+    const van = Math.floor(Math.min(...ds.map(c => G.min(c.start))) / 60);
+    const tot = Math.ceil(Math.max(...ds.map(c => G.min(c.start) + G.hours(c.start, c.eind) * 60)) / 60);
+    const uren = []; for (let u = van; u < tot && uren.length < 24; u++) uren.push(u);
+    const n = u => ds.filter(c => { const a = G.min(c.start), b = a + G.hours(c.start, c.eind) * 60; return a < (u + 1) * 60 && b > u * 60; }).reduce((t, c) => t + (+c.aantal || 1), 0);
+    const tel = uren.map(n), max = Math.max(1, ...tel);
+    return `<div class="uurbalk" title="Aantal mensen per uur">${uren.map((u, i) => `<div class="uur"><span class="uur-n">${tel[i] || ''}</span><i style="height:${Math.round(tel[i] / max * 40)}px${tel[i] === max && max > Math.min(...tel) ? ';background:var(--accent)' : ''}"></i><small>${u % 24}</small></div>`).join('')}</div>`;
+  }
+
+  // In één keer de vaste diensten voor een aantal dagen maken: openingstijden, splitsen en spits
+  async function cafSnelInvullen() {
+    const fns = A.data.instellingen.functies || [];
+    const gebruikt = [...new Set(A.data.cafetaria_diensten.map(c => c.functie))];
+    const std = gebruikt.length ? gebruikt : fns.slice(0, 2);
+    const html = `<p class="zacht" style="margin-top:-.3em">Vul dit in voor dagen met dezelfde openingstijd. Hebben andere dagen een andere tijd (bv. het weekend), doe het daarna nog een keer voor die dagen.</p>
+      <div class="veld"><label>Voor welke dagen?</label><div class="chips">${A.DAGEN.map((d, i) => `<label class="chip-keuze"><input type="checkbox" name="sDag" value="${i}" ${i >= 1 && i <= 4 ? 'checked' : ''}><span>${A.DAG_KORT[i]}</span></label>`).join('')}</div></div>
+      <div class="rij"><div class="veld"><label>Open van</label><input type="time" id="sOpen" value="10:00"></div><div class="veld"><label>tot</label><input type="time" id="sDicht" value="20:00"></div>
+        <div class="veld"><label>Wissel van dienst om <small>(leeg = één lange dienst)</small></label><input type="time" id="sSplit" value="15:00"></div></div>
+      <div class="rij"><div class="veld"><label>Spits van</label><input type="time" id="sSpitsVan" value="17:00"></div><div class="veld"><label>tot</label><input type="time" id="sSpitsTot" value="20:00"></div><div class="veld"></div></div>
+      <div class="veld"><label>Hoeveel mensen per functie?</label>
+        <table class="lijst snel-tabel"><thead><tr><th>Functie</th><th>Normaal</th><th>Extra in de spits</th></tr></thead><tbody>
+        ${fns.map(f => `<tr><td>${esc(f)}</td><td><input type="number" min="0" max="20" data-norm="${esc(f)}" value="${std.includes(f) ? 1 : 0}"></td><td><input type="number" min="0" max="20" data-spits="${esc(f)}" value="0"></td></tr>`).join('')}
+        </tbody></table></div>
+      <div id="sVoorbeeld" class="snel-voorbeeld"></div>
+      <p class="zacht" style="font-size:.85rem">⚠️ Bestaande vaste diensten op de gekozen dagen worden vervangen.</p>`;
+    const lees = bg => {
+      const dagen = [...bg.querySelectorAll('input[name=sDag]:checked')].map(i => +i.value);
+      const open = bg.querySelector('#sOpen').value, dicht = bg.querySelector('#sDicht').value, split = bg.querySelector('#sSplit').value;
+      const sv = bg.querySelector('#sSpitsVan').value, st = bg.querySelector('#sSpitsTot').value;
+      const diensten = [];
+      const splitOk = split && G.min(split) > G.min(open) && G.min(split) < G.min(dicht);
+      for (const f of fns) {
+        const norm = +bg.querySelector(`[data-norm="${CSS.escape(f)}"]`).value || 0, spits = +bg.querySelector(`[data-spits="${CSS.escape(f)}"]`).value || 0;
+        if (norm) {
+          if (splitOk) diensten.push({ start: open, eind: split, functie: f, aantal: norm }, { start: split, eind: dicht, functie: f, aantal: norm });
+          else diensten.push({ start: open, eind: dicht, functie: f, aantal: norm });
+        }
+        if (spits && sv && st) diensten.push({ start: sv, eind: st, functie: f, aantal: spits });
+      }
+      return { dagen, diensten, open, dicht };
+    };
+    const res = await A.modal('⚡ Snel invullen', html, [{ label: 'Annuleren', waarde: null }, { label: 'Opslaan', soort: 'primair',
+      controle: bg => { const r = lees(bg); if (!r.dagen.length) return 'Kies minstens één dag'; if (!r.open || !r.dicht || G.min(r.dicht) <= G.min(r.open)) return 'Vul geldige openingstijden in'; if (!r.diensten.length) return 'Geef bij minstens één functie een aantal op'; return null; },
+      waarde: bg => lees(bg) }], bg => {
+      const toon = () => { const r = lees(bg);
+        bg.querySelector('#sVoorbeeld').innerHTML = r.diensten.length ? `<b>Zo wordt het per dag:</b>${uurBalk(r.diensten)}<div class="zacht" style="font-size:.85rem">${r.diensten.sort((a, b) => G.min(a.start) - G.min(b.start)).map(c => `${c.start}–${c.eind} ${esc(c.functie)} ${c.aantal}×`).join(' · ')}</div>` : '<span class="zacht">Nog geen diensten.</span>'; };
+      bg.querySelectorAll('input').forEach(i => i.addEventListener('input', toon)); bg.querySelectorAll('input').forEach(i => i.addEventListener('change', toon)); toon();
+    });
+    if (!res) return;
+    await A.bezig(null, async () => {
+      for (const c of A.data.cafetaria_diensten.filter(c => res.dagen.includes(+c.weekdag))) await Store.remove('cafetaria_diensten', c.id);
+      await Store.insert('cafetaria_diensten', res.dagen.flatMap(wd => res.diensten.map(c => ({ weekdag: wd, ...c }))));
+    });
+    await herlaad(); pCafetaria(); hintOpnieuw();
   }
 
   async function cafModal(c, wd) {
