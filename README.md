@@ -129,6 +129,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Reageren t/m voor de hele maand.** Lopen er oproepen in een maand, dan staat bovenaan die maand bij **Zalencentrum** de knop **⏳ Reageren t/m aanpassen**. Kies één datum en die geldt voor alle feesten van die maand waarvoor de oproep nog loopt. Ligt een feest te dichtbij, dan wordt voor dat feest automatisch 2 dagen ervoor genomen.
 
+**Beschikbaar op de telefoon.** Bovenaan staan snelknoppen (🎉 Kun jij? · 🙋 Open diensten · ☕ Cafetaria) met het aantal; tik erop en je springt naar dat stuk. Heeft iemand nog niet op een feest gereageerd, dan staat *Kun jij op deze feesten?* bovenaan. Open diensten staan per feest (of per dag in de cafetaria) bij elkaar, met per functie één regel en een knop Oppakken, bijv. *3× Bar zaal*.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.

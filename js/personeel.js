@@ -278,16 +278,37 @@
                 <button type="button" class="k3-tekst ja" data-kan="1">Ik kan</button></div>
                 ${st === 'leeg' ? '<small class="k3-hint">Nog niet gekozen</small>' : ''}</div>`; })()}</div>`; };
     zetGezien(uitvragen);
+    // Open diensten compact: één blok per feest (of per dag in de cafetaria), daarin per functie + tijd één regel
+    const openBlokken = []; { const per = new Map();
+      for (const d of open) { const k = d.event_id || d.datum + '|' + d.locatie;
+        if (!per.has(k)) { const b = { d, regels: new Map() }; per.set(k, b); openBlokken.push(b); }
+        const rk = [d.functie, d.start, d.eind, A.beheerPlek(d) ? d.medewerker_id : ''].join('|'), rg = per.get(k).regels;
+        if (!rg.has(rk)) rg.set(rk, []); rg.get(rk).push(d); } }
+    const openBlok = ({ d, regels }) => { const ev = d.event_id && A.event(d.event_id);
+      const zeiNee = ev && (mijnReactie(ev) || {}).kan === false;
+      const tijden = [...new Set([...regels.values()].map(l => tijd(l[0])))];
+      return `<div class="item open-blok"><div class="datumblok ${d.locatie}"><b>${G.parse(d.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(d.datum)]}</small></div>
+        <div style="min-width:0;flex:1"><div class="wie">${ev ? '🎉 ' + esc(ev.naam) : A.LOC[d.locatie]}</div>
+          <div class="meta">${esc(A.datumLang(d.datum))}${tijden.length === 1 ? ' · ' + tijden[0] : ''}${zeiNee ? ' · <b>je zei "kan niet", maar kun je toch? Pak hem op</b>' : ''}</div>
+          ${[...regels.values()].map(l => { const x = l[0]; return `<div class="open-regel"><span><b>${l.length > 1 ? l.length + '× ' : ''}${esc(x.functie)}</b>${tijden.length > 1 ? ' <small>' + tijd(x) + '</small>' : ''}${A.beheerPlek(x) ? `<small class="ster">⭐ nu doet ${esc(A.mwNaam(x.medewerker_id))} dit</small>` : ''}</span><button class="knop klein primair" data-pak="${x.id}">Oppakken</button></div>`; }).join('')}</div></div>`; };
+    const nKies = uitvragen.filter(e => !mijnReactie(e)).length;
+    const spring = [uitvragen.length && ['spFeesten', `🎉 Kun jij? ${nKies ? `<b class="sp-n">${nKies}</b>` : '✓'}`],
+      open.length && ['spOpen', `🙋 Open diensten <b class="sp-n">${open.length}</b>`],
+      caf.length && ['spCaf', `☕ Cafetaria <b class="sp-n">${caf.length}</b>`]].filter(Boolean);
+    const openHtml = open.length ? `<div class="paneel" id="spOpen" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${openBlokken.map(openBlok).join('')}</div>` : '';
     $('#inhoud').innerHTML = `
-      ${open.length ? `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>🙋 Open diensten die jij kunt doen</h3></div>${open.map(d => dienstItem(d, `<button class="knop klein primair" data-pak="${d.id}">Oppakken</button>`, '', (A.beheerPlek(d) ? `<div class="meta" style="color:var(--let)">⭐ Nu doet ${esc(A.mwNaam(d.medewerker_id))} deze plek</div>` : '') + ((A.data.event_reacties.find(r => d.event_id && r.event_id === d.event_id && r.medewerker_id === ik.id) || {}).kan === false ? '<div class="meta"><b>Kun je toch? Dan kun je deze dienst nog oppakken.</b></div>' : ''))).join('')}</div>` : ''}
-      ${uitvragen.length ? `<div class="paneel" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
-        <p class="zacht" style="font-size:.88rem;margin-top:-.3em">Schuif naar rechts (groen) als je kunt, naar links (rood) als je niet kunt. Kun je, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de termijn nog wijzigen.</p>
+      ${spring.length > 1 ? `<div class="spring">${spring.map(([id, t]) => `<button type="button" data-spring="${id}">${t}</button>`).join('')}</div>` : ''}
+      ${nKies ? '' : openHtml}
+      ${uitvragen.length ? `<div class="paneel" id="spFeesten" style="border:2px solid var(--zaal-licht)"><div class="paneel-kop"><h3>🎉 Kun jij op deze feesten?</h3></div>
+        <div class="zacht" style="font-size:.88rem;margin:-.3em 0 .6em">Schuif naar rechts als je kunt, naar links als je niet kunt. <details class="uitleg-klein"><summary>Meer uitleg</summary>Kun je, dan zie je het feest grijs bij Mijn diensten tot het bevestigd is. Wie het eerst reageert, krijgt geen voorrang. Je reactie kun je tot de datum nog wijzigen.</details></div>
         ${uitvragen.map(uitvraagItem).join('')}</div>` : ''}
-      ${cafMaanden.map(mnd => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
+      ${nKies ? openHtml : ''}
+      ${cafMaanden.map((mnd, i) => { const gs = caf.filter(g => g.maand === mnd); return `<div class="paneel" ${i ? '' : 'id="spCaf"'} style="border:2px solid var(--accent-licht)"><div class="paneel-kop"><h3>☕ ${gs[0].extra ? 'Extra werken? ' : ''}Open cafetariadiensten ${esc(A.maandNaam(mnd))}</h3></div>
         <p class="zacht" style="font-size:.88rem;margin-top:-.3em">${gs[0].extra ? 'Je vaste diensten staan (grijs) bij Mijn diensten. Wil je extra werken? Zet de schuif naar rechts bij de diensten die je erbij wilt; laat hem staan als je geen extra wilt.' : 'Het voorlopige rooster is gemaakt. Deze diensten zijn nog open. Schuif naar rechts als je kunt, naar links als je niet kunt.'} Kiezen kan t/m <b>${esc(A.datumLang(gs[0].tot))}</b>; daarna wordt het werk eerlijk verdeeld (wie het eerst reageert, krijgt geen voorrang).</p>
         ${gs.map(cafItem).join('')}</div>`; }).join('')}
       ${!uitvragen.length && !open.length && !caf.length ? '<div class="paneel"><div class="leeg"><span class="groot">👌</span>Er zijn nu geen beschikbare diensten</div></div>' : ''}`;
     koppelActies();
+    document.querySelectorAll('[data-spring]').forEach(k => k.onclick = () => { const el = document.getElementById(k.dataset.spring); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 10, behavior: 'smooth' }); });
     const mb = document.querySelector('#onderbalk button[data-t=beschikbaar] .badge');
     if (mb) { const n = open.length + nieuweUitvragen().length; mb.textContent = n; mb.classList.toggle('verborgen', !n); }
   }

@@ -512,3 +512,18 @@ details.paneel[open] > summary::before { content: '▾'; }
 .open-plek small { font-weight: 400; opacity: .75; }
 .open-plek:hover { border-color: var(--accent); }
 .open-plek.niemand { border-color: var(--fout); color: var(--fout); background: #fdeeee; }
+
+/* Personeel – Beschikbaar: snelknoppen en compacte open diensten */
+.spring { display: flex; gap: .4em; flex-wrap: wrap; margin: 0 0 .8em; }
+.spring button { border: 1px solid var(--lijn); background: #fff; border-radius: 999px; padding: .45em .9em; font-weight: 600; font-size: .9rem; cursor: pointer; width: auto; min-height: 0; color: inherit; }
+.spring .sp-n { display: inline-block; min-width: 1.4em; padding: 0 .35em; margin-left: .2em; border-radius: 999px; background: var(--accent); color: #fff; font-size: .8rem; text-align: center; }
+.item.open-blok { align-items: flex-start; }
+.open-regel { display: flex; align-items: center; justify-content: space-between; gap: .6em; padding: .35em 0; border-top: 1px dashed #eee4d6; }
+.open-regel:first-of-type { margin-top: .3em; }
+.open-regel small { color: var(--zacht); white-space: nowrap; }
+.open-regel .ster { display: block; color: var(--let); }
+.open-regel .knop { flex-shrink: 0; }
+.uitleg-klein { display: inline; }
+.uitleg-klein summary { display: inline; cursor: pointer; text-decoration: underline; list-style: none; }
+.uitleg-klein summary::-webkit-details-marker { display: none; }
+.uitleg-klein[open] { display: block; margin-top: .3em; }
