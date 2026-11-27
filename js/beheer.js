@@ -1422,6 +1422,36 @@
   }
 
   // Gecontroleerde feesten versturen naar het personeel
+  // Inplannen ongedaan maken voor feesten die nog NIET verstuurd zijn: de indeling vervalt.
+  // Met oproep: de oproep gaat weer open (reacties blijven staan). Zonder oproep: de indeling wordt
+  // weer leeg: de plekken blijven open om zelf in te vullen. Personeel heeft niets gezien, dus geen meldingen.
+  async function feestenOngedaan(events) {
+    const vandaag = G.today(), dagenUit = +A.data.instellingen.uitvraag_dagen || 7; let n = 0; const teDichtbij = [];
+    for (const ev0 of events) {
+      if (ev0.status !== 'concept') continue;
+      const ds = A.data.diensten.filter(x => x.event_id === ev0.id);
+      if (ev0.uitvraag && vandaag >= G.addDays(ev0.datum, -1)) { teDichtbij.push(ev0.naam); continue; }
+      if (!ev0.uitvraag) {   // zonder oproep: mensen eraf, plekken blijven open om zelf in te vullen
+        const mensen = ds.filter(x => x.medewerker_id); if (!mensen.length) continue;
+        for (const x of mensen) await Store.update('diensten', x.id, { medewerker_id: null });
+        n++; continue;
+      }
+      await Store.update('zalen_events', ev0.id, { bezetting: G.inhuurInBezetting(ev0.bezetting, ds, A.data) });
+      for (const x of ds) await Store.remove('diensten', x.id);
+      {
+        let tot = ev0.uitvraag_tot && ev0.uitvraag_tot >= vandaag ? ev0.uitvraag_tot : Uitvraag.standaardTermijn(ev0.datum, dagenUit, vandaag);
+        if (!tot || tot < vandaag) tot = vandaag;
+        if (tot >= G.addDays(ev0.datum, -1)) tot = G.addDays(ev0.datum, -2) >= vandaag ? G.addDays(ev0.datum, -2) : vandaag;
+        await Store.update('zalen_events', ev0.id, { status: 'open', uitvraag_tot: tot, herinnerd: false });
+      }
+      n++;
+    }
+    await herlaad();
+    if (teDichtbij.length) A.toast('Te dichtbij om de oproep weer te openen: ' + teDichtbij.join(', ') + '. Pas de indeling aan via het feest.', 'fout');
+    if (n) A.toast(`${n} feest${n > 1 ? 'en' : ''}: inplannen ongedaan gemaakt`, 'ok');
+    return n;
+  }
+
   async function verstuurEvents(events) {
     const html = `<p>Deze feesten zijn ingepland en wachten op jouw controle. Na versturen krijgt iedereen die is ingeroosterd een melding. Oproepkrachten die "kan" zeiden maar niet nodig zijn, krijgen ook bericht.</p>
       ${events.map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id).sort((a, b) => a.functie.localeCompare(b.functie));
@@ -1462,7 +1492,10 @@
       ${Object.keys(perMaand).length ? Object.keys(perMaand).map(m => `<div class="paneel"><div class="paneel-kop"><h3 style="text-transform:capitalize">${esc(A.maandNaam(m))}</h3>${(() => { // status van het zalencentrum zelf (los van de cafetaria)
           const niet = feestenNogNietVerstuurd(m).length;
           const verst = perMaand[m].some(e => e.status === 'ingepland' || (!e.status && A.isGepubliceerd(m) && A.data.diensten.some(x => x.event_id === e.id)));
-          return niet ? `<span class="label let">${niet} feest${niet > 1 ? 'en' : ''} nog niet verstuurd</span>` : verst ? '<span class="label ok">zalencentrum verstuurd</span>' : '<span class="label">nog niet ingepland</span>'; })()}</div>
+          const conc = perMaand[m].filter(e => e.status === 'concept').length;
+          return '<span style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap">' + (niet ? `<span class="label let">${niet} feest${niet > 1 ? 'en' : ''} nog niet verstuurd</span>` : '')
+            + (conc ? ` <button class="knop klein" type="button" data-ongedaanmaand="${m}">↩ Hele maand ongedaan maken</button>` : '')
+            + (niet ? '' : verst ? '<span class="label ok">zalencentrum verstuurd</span>' : '<span class="label">nog niet ingepland</span>') + '</span>'; })()}</div>
         ${perMaand[m].map(e => { const ds = A.data.diensten.filter(x => x.event_id === e.id); const open = ds.filter(x => !x.medewerker_id).length; const nodig = (e.bezetting || []).reduce((s, b) => s + (+b.aantal || 0), 0);
           const uv = e.status === 'open' ? uitvraagOverzicht(e) : null;
           const status = uv ? uv.rechts : e.status === 'concept' ? `<span class="label let">✓ ingepland · nog niet verstuurd${open ? ' · ' + open + ' open' : ''}</span>` : ds.length ? (open ? `<span class="label fout">${open} open</span>` : nodig ? '<span class="label ok">compleet</span>' : '') : '<span class="label">wordt ingepland met maandrooster</span>';
@@ -1471,7 +1504,7 @@
           <div><div class="wie">${esc(e.naam)}</div><div class="meta">${tijd(e)} · ${e.gasten || '?'} gasten${e.zaal ? ' · ' + esc(e.zaal) : ''} · ${(e.bezetting || []).map(b => b.aantal + '× ' + esc(b.functie)).join(', ') || '<span style="color:var(--fout)">geen bezetting opgegeven</span>'}</div>
           ${uv ? uv.meta : ''}
           ${ds.filter(x => x.medewerker_id).length ? `<div class="meta">👥 ${ds.filter(x => x.medewerker_id).map(x => esc(A.mwNaam(x.medewerker_id))).join(', ')}</div>` : ''}</div>
-          <div class="rechts">${status}</div></div>`; }).join('')}</div>`).join('')
+          <div class="rechts">${status}${e.status === 'concept' && (e.uitvraag || ds.some(x => x.medewerker_id)) ? ` <button class="knop klein" type="button" data-ongedaan="${e.id}" title="De indeling vervalt; het personeel heeft nog niets gezien">↩ Ongedaan maken</button>` : ''}</div></div>`; }).join('')}</div>`).join('')
         : `<div class="paneel"><div class="leeg"><span class="groot">🎉</span>${staat.zalenVerleden ? 'Geen afgelopen feesten' : 'Nog geen feesten gepland'}</div></div>`}
       ${verdeling.length ? `<div class="paneel"><div class="paneel-kop"><h3>Verdeling oproepkrachten</h3><small class="zacht">afgelopen 3 maanden + wat al gepland staat</small></div>
         <div class="tabel-wrap"><table class="lijst"><thead><tr><th>Oproepkracht</th><th>Diensten</th><th>Uren</th><th style="width:28%"></th><th>Zei 'kan'</th><th>Reageert</th><th>Reactietijd</th></tr></thead><tbody>
@@ -1483,6 +1516,14 @@
     if ($('#deelUitvraag')) $('#deelUitvraag').onclick = () => deelUitvraagWhatsApp(lopend);
     if ($('#verstuurEvents')) $('#verstuurEvents').onclick = () => verstuurEvents(concepten);
     hoofd.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
+    hoofd.querySelectorAll('[data-ongedaan]').forEach(k => k.onclick = ev => { ev.stopPropagation(); A.bezig(k, async () => {
+      const e = A.event(k.dataset.ongedaan);
+      if (!await A.bevestig('Inplannen ongedaan maken', `De indeling van ${e.naam} (${A.datumLang(e.datum)}) vervalt. ${e.uitvraag ? 'De oproep gaat weer open; wie al heeft gereageerd hoeft dat niet opnieuw te doen.' : 'De mensen worden eraf gehaald; de plekken blijven open zodat je ze zelf kunt invullen.'} Het personeel heeft nog niets gezien, er gaan geen meldingen uit.`, 'Ongedaan maken')) return;
+      await feestenOngedaan([e]); pZalen(); }); });
+    hoofd.querySelectorAll('[data-ongedaanmaand]').forEach(k => k.onclick = () => A.bezig(k, async () => {
+      const m = k.dataset.ongedaanmaand, evs = A.data.zalen_events.filter(e => G.monthOf(e.datum) === m && e.status === 'concept');
+      if (!await A.bevestig('Hele maand ongedaan maken', `Bij ${evs.length} feest${evs.length > 1 ? 'en' : ''} in ${A.maandNaam(m)} vervalt de indeling (alleen wat nog niet verstuurd is). Feesten met een oproep gaan weer open (reacties blijven staan); bij feesten zonder oproep blijven de plekken open om zelf in te vullen. Er gaan geen meldingen uit.`, 'Ongedaan maken')) return;
+      await feestenOngedaan(evs); pZalen(); }));
     hoofd.querySelectorAll('[data-kaart]').forEach(x => x.onclick = () => { location.hash = 'personeel/' + x.dataset.kaart; });
   }
 

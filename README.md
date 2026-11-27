@@ -125,6 +125,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Nog in te vullen** toont per dag één regel (cafetaria of het feest) met de open plekken als knopjes, bijv. *Keuken 10:00–16:00*, *2× Frituur 17:00–19:00*. Tik op een knopje om iemand in te vullen; daar zie je wie de functie heeft en vrij is. Een rood knopje betekent: niemand van het personeel heeft die functie en is vrij.
 
+**Inplannen ongedaan maken.** Bij **Zalencentrum** staat naast elk feest dat *ingepland · nog niet verstuurd* is een knop **↩ Ongedaan maken**, en bovenaan de maand **↩ Hele maand ongedaan maken**. Bij een feest met oproep vervalt de indeling en gaat de oproep weer open (reacties blijven staan). Bij een feest zonder oproep worden de mensen eraf gehaald en blijven de plekken open om zelf in te vullen. Het personeel heeft nog niets gezien, dus er gaan geen meldingen uit. Al verstuurde feesten trek je terug via Rooster → Zalen → Zalencentrum terugtrekken.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.
