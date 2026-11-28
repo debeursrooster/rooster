@@ -137,6 +137,8 @@ Let op: verander je daarna de datum, tijden of bezetting van het hele feest, dan
 
 **Ploeg samenstellen (leeftijd, ervaring, niveau).** Bij elke medewerker: *Ervaring* (🌱 nieuw / ⭐ ervaren / 👑 kan leiden), *Geboortedatum* en *Niveau* ★1–5 (snelheid en kwaliteit). De planner zet nieuwe mensen en iedereen onder 18 zo veel mogelijk samen met een ervaren collega van 18+, en mengt sterke en minder sterke mensen. Onder 18 niet na 23:00, onder 16 niet na 19:00 (uit te zetten), en per functie een minimumleeftijd. In te stellen bij **Instellingen → Ploeg samenstellen**. Lukt het niet, dan staat er een gele balk bij het rooster en een waarschuwing bij het feest. Collega's zien deze gegevens niet. Opslaan kan pas na `update-1.9.17.sql` (Supabase-pakket).
 
+**Tijden in de voorspelling.** Terwijl de oproep van een feest loopt, kun je in *Zo staat het nu (voorlopig)* al tijden aanpassen: per plek (de regel in de bezetting wordt gesplitst, bv. 1× Bar 18:00 en 1× Bar 20:00) en per persoon voor wie vaststaat (bevestigd, de baas, inhuur; bewaard in de bezetting als `tijden`). Dat blijft staan bij het indelen. Verschillende begintijden kunnen ook direct bij *Benodigd personeel* met meerdere regels voor dezelfde functie.
+
 **Wat er gebeurt na het publiceren:**
 - *Automatisch versturen*: wil de eigenaar niet eerst controleren, zet dan bij Instellingen *"Automatisch gemaakt rooster meteen versturen"* aan. Dat geldt voor maandroosters en voor feesten.
 - *Vrij goedkeuren* → als iemand al stond ingepland, zoekt de app zelf een vervanger en laat zien wie dat wordt.
