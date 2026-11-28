@@ -102,7 +102,8 @@
   };
   G.beheerMw = data => (data.medewerkers || []).find(G.isBeheer) || null;
   // Mag het personeel een plek van de baas overnemen? (per functie in te stellen bij het feest; standaard ja)
-  G.baasOverneembaar = (d, e) => !(e && (e.bezetting || []).some(b => b.functie === d.functie && b.baas_overname === false));
+  // per dienst (d.baas_overname === false = Ricardo houdt hem zelf), anders per functie van het feest; standaard: mag
+  G.baasOverneembaar = (d, e) => d.baas_overname !== false && !(e && (e.bezetting || []).some(b => b.functie === d.functie && b.baas_overname === false));
   G.eventVast = e => !!e && ['open', 'concept', 'ingepland'].includes(e.status);
   // "Wie X kan, kan ook Y" (Instellingen → Functies). Vult bij het laden de functies van iedereen aan,
   // zodat de planner, oproepen en het oppakken van diensten het vanzelf meenemen.

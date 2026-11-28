@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cafetariarooster controleren</title>
+<link rel="stylesheet" href="stijl.css">
+</head>
+<body>
+<header class="kopbalk"><div class="binnen">
+  <img src="../logo-donker.svg" alt="Anytyme De Beurs – Rooster">
+  <h1>Voorbeeld: cafetariarooster controleren en versturen</h1>
+  <p>Zo ziet een cafetariarooster eruit dat klaarstaat, en hier let je op voordat je op Versturen drukt. De voorbeelden komen uit de demo (december 2026).</p>
+  <div class="knoppen"><a class="knop" href="../beheer.html">← Naar het beheer</a><a class="knop" href="ricardo.html">Handleiding Ricardo</a><a class="knop" href="javascript:print()">🖨️ Afdrukken</a></div>
+</div></header>
+
+<main>
+<nav class="inhoud" id="top"><h2>Inhoud</h2>
+<ol>
+  <li><a href="#eerst">Eerst invullen (eenmalig)</a></li>
+  <li><a href="#klaar">Het rooster staat klaar</a></li>
+  <li><a href="#open">Controle 1: open diensten</a></li>
+  <li><a href="#opmerkingen">Controle 2: opmerkingen van de planner</a></li>
+  <li><a href="#uren">Controle 3: uren per persoon</a></li>
+  <li><a href="#persoon">Controle 4: verdeling per persoon</a></li>
+  <li><a href="#ploeg">Controle 5: ploeg en dichte dagen</a></li>
+  <li><a href="#versturen">Versturen</a></li>
+  <li><a href="#lijst">Controlelijst om af te vinken</a></li>
+</ol></nav>
+
+<section id="eerst"><h2><span class="nr">1</span>Eerst invullen (eenmalig)</h2>
+<p>De planner kan alleen een goed cafetariarooster maken als hij weet <b>wie er werkt</b> en <b>welke diensten er zijn</b>. Zolang dat niet is ingevuld, blijven bijna alle diensten open (rood). Dat zag je in december: 256 open diensten.</p>
+<h3>A. Bij Personeel – voor iedereen die in de cafetaria werkt</h3>
+<table>
+  <tr><th>Veld</th><th>Waarom belangrijk voor de cafetaria</th></tr>
+  <tr><td><b>Werkt in: Cafetaria</b></td><td>Zonder dit vinkje wordt iemand nooit in de cafetaria gepland.</td></tr>
+  <tr><td><b>Functies</b></td><td>Moeten precies passen bij de cafetariadiensten (bijv. Keuken, Frituur, Afwas, Bezorging, Kassa/bediening).</td></tr>
+  <tr><td><b>Contracturen per week</b></td><td>Vast personeel: de planner probeert dit vol te plannen. <b>0 = oproepkracht</b>: die wordt in de cafetaria <b>niet vanzelf</b> ingepland, maar kiest zelf via “Ik kan” of pakt open diensten op.</td></tr>
+  <tr><td><b>Vaste werkdagen</b></td><td>Op deze dagen krijgt iemand voorrang. Iemand met 0 uur maar wél vaste werkdagen wordt op die dagen toch gepland.</td></tr>
+  <tr><td><b>Kan nooit op / Liever niet op</b></td><td>Bijv. schooldagen of een vaste vrije dag.</td></tr>
+  <tr><td><b>Max. dagen per week</b></td><td>Meer dagen plant de app niet.</td></tr>
+  <tr><td><b>Ervaring, geboortedatum, niveau ★</b></td><td>Zodat nieuwe en jonge mensen niet zonder ervaren collega staan, en sterk/minder sterk gemengd wordt.</td></tr>
+</table>
+<h3>B. Bij Cafetaria – de vaste diensten</h3>
+<p>Met <b>⚡ Snel invullen</b> zet je per dag de openingstijden, de wissel en de spits erin. Bijvoorbeeld: di t/m vr 10:00–20:00, za en zo 11:00–20:00, maandag dicht. Het balkje per dag laat zien hoeveel mensen er per uur staan.</p>
+<figure><img src="img/c-vast.jpg" alt="Cafetaria vaste diensten" loading="lazy"><figcaption>De vaste cafetariadiensten per weekdag.</figcaption></figure>
+<h3>C. Sluitingsdagen</h3>
+<p>Onderaan de pagina Cafetaria: feestdagen en vakanties waarop de cafetaria dicht is (bijv. 1e en 2e kerstdag). Op die dagen worden geen diensten gemaakt.</p>
+<div class="tip"><b>Daarna opnieuw maken</b>Heb je dit ingevuld terwijl het rooster van die maand al bestond? Ga dan naar <i>Rooster → Cafetaria</i> en tik op <b>🔄 Opnieuw maken</b>.</div>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="klaar"><h2><span class="nr">2</span>Het rooster staat klaar</h2>
+<p>Ongeveer 3 weken voor de nieuwe maand maakt de app het rooster. Je krijgt een bericht en bij <i>Te doen</i> staat <b>“Cafetariarooster … nakijken en versturen”</b>. Tik erop: je komt meteen bij <i>Rooster → Cafetaria</i>.</p>
+<figure><img src="img/c-kalender.jpg" alt="Cafetariarooster klaar om na te kijken" loading="lazy"><figcaption>Een cafetariarooster dat klaarstaat. Bovenaan de gele balk: <b>klaar om na te kijken</b>, met hoeveel diensten nog open zijn en de knoppen.</figcaption></figure>
+<p>Het personeel ziet nog <b>niets</b>. Je kunt rustig alles aanpassen.</p>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="open"><h2><span class="nr">3</span>Controle 1: open diensten</h2>
+<p>Open diensten zijn <span class="label rood">rood</span> (bijv. <i>Open 2× Bediening</i> op za 5 december). Tik erop:</p>
+<ul>
+  <li>Je ziet wie het kan doen, met de beste keuze bovenaan, en waarom (bijv. <i>oproepkracht · 22 u in 3 mnd</i>).</li>
+  <li>Wie niet kan, staat er grijs bij met de reden (<i>werkt dan al</i>, <i>werkt niet in cafetaria</i>, <i>vaste vrije dag</i>…).</li>
+  <li>Kies iemand, of laat hem <b>open</b>. Na het versturen kan het personeel open diensten zelf oppakken.</li>
+</ul>
+<figure class="klein"><img src="img/c-open-dienst.jpg" alt="Open dienst invullen" loading="lazy"></figure>
+<div class="let"><b>Heel veel open?</b>Dan klopt er iets bij Personeel: te weinig mensen met “Werkt in: Cafetaria”, functies die niet passen, of iedereen staat op 0 uur (oproepkracht). Vul dat aan en tik op <b>Opnieuw maken</b>.</div>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="opmerkingen"><h2><span class="nr">4</span>Controle 2: opmerkingen van de planner</h2>
+<p>Tik op <span class="k">⚠️ 3 opmerkingen van de planner</span>. Daar staat wat niet helemaal gelukt is.</p>
+<figure class="klein"><img src="img/c-opmerkingen.jpg" alt="Opmerkingen van de planner" loading="lazy"></figure>
+<table>
+  <tr><th>Opmerking</th><th>Wat doe je?</th></tr>
+  <tr><td>Lisa heeft maar 10,5 uur rust voor zo 6 dec</td><td>Laat avond, vroeg weer beginnen. Prima als Lisa dat goed vindt; anders de dienst van zo 6 dec aan iemand anders geven.</td></tr>
+  <tr><td>Ruben: 6 van ~89 uur ingepland</td><td>Ruben komt veel tekort. Kijk bij Personeel: heeft hij functies die in de cafetaria voorkomen? Staat “Cafetaria” aangevinkt? (In de demo heeft Ruben Keuken/Afwas, terwijl er alleen Bediening- en Frituurdiensten zijn.)</td></tr>
+  <tr><td>… werkt 7 dagen achter elkaar</td><td>Geef één van die diensten aan iemand anders.</td></tr>
+</table>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="uren"><h2><span class="nr">5</span>Controle 3: uren per persoon</h2>
+<p>Kies bovenaan <span class="k">Uren</span>. Per medewerker zie je het contract, het doel voor de maand en wat er gepland is.</p>
+<figure><img src="img/c-uren.jpg" alt="Uren per persoon" loading="lazy"><figcaption><span class="label groen">groen</span> balkje = goed · <span class="label oranje">oranje</span> = te weinig. Tussen haakjes hoeveel uur iemand tekort komt.</figcaption></figure>
+<ul>
+  <li>Iedereen met een contract moet ongeveer op zijn uren zitten. Een paar uur minder is normaal, omdat de zalen-uren er nog bij komen.</li>
+  <li>Komt iemand veel tekort (zoals Ruben en Daan hier)? Geef die persoon een paar open diensten, of diensten van iemand die al veel heeft.</li>
+  <li>Met <span class="k">⬇ Exporteer</span> krijg je een Excel-bestand voor de salarisadministratie.</li>
+</ul>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="persoon"><h2><span class="nr">6</span>Controle 4: verdeling per persoon</h2>
+<p>Kies bovenaan <span class="k">Per persoon</span>. Per medewerker zie je per dag de dienst.</p>
+<figure><img src="img/c-perpersoon.jpg" alt="Per persoon" loading="lazy"><figcaption><b>V</b> = vrij (goedgekeurd) · <b>–</b> = heeft aangegeven niet te kunnen · <b>·</b> = vaste vrije dag.</figcaption></figure>
+<p>Let op:</p>
+<ul>
+  <li>Zijn de <b>weekenden</b> (gekleurde kolommen) eerlijk verdeeld?</li>
+  <li>Heeft niemand twee diensten op één dag die hij niet wil (bijv. <i>11-16</i> én <i>16-21</i>)?</li>
+  <li>Klopt het met wat je weet: wie op vakantie is, wie op school zit…</li>
+</ul>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="ploeg"><h2><span class="nr">7</span>Controle 5: ploeg en dichte dagen</h2>
+<ul>
+  <li>Staat er een gele balk <b>🌱 … nieuw of jong personeel zonder ervaren collega</b>? Tik op <i>Bekijken</i> en zet op die momenten een ervaren collega (18+) erbij.</li>
+  <li>Dagen waarop de cafetaria dicht is, staan smal met <i>dicht</i> (in het voorbeeld maandag 7 december). Klopt dat met de feestdagen?</li>
+</ul>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="versturen"><h2><span class="nr">8</span>Versturen</h2>
+<ol class="stappen">
+  <li>Zorg dat bovenaan het tabblad <b>Cafetaria</b> gekozen is.</li>
+  <li>Tik op <span class="k groen">📤 Cafetaria versturen</span>.</li>
+  <li>Je ziet nog één keer hoeveel diensten open zijn. Tik op <span class="k groen">📤 Versturen</span>.</li>
+  <li>Iedereen die ingeroosterd is, krijgt een bericht. Daarna kun je met één tik ook een bericht in de WhatsApp-groep zetten.</li>
+</ol>
+<figure class="klein"><img src="img/c-versturen.jpg" alt="Cafetaria versturen" loading="lazy"></figure>
+<div class="goed"><b>Na het versturen</b>Je kunt altijd nog iets veranderen. Tik op een dienst en kies iemand anders; de betrokkenen krijgen dan vanzelf een bericht. Toch iets groots vergeten? Met <b>↩︎ Cafetaria terugtrekken</b> ziet het personeel het rooster weer niet tot je opnieuw verstuurt.</div>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<section id="lijst"><h2><span class="nr">9</span>Controlelijst om af te vinken</h2>
+<table>
+  <tr><th style="width:2.2em"></th><th>Controle</th></tr>
+  <tr><td>☐</td><td>Iedereen van de cafetaria staat bij Personeel met <b>Werkt in: Cafetaria</b>, de juiste <b>functies</b>, <b>contracturen</b> en <b>vaste werkdagen</b>.</td></tr>
+  <tr><td>☐</td><td>De vaste diensten (openingstijden en spits) kloppen bij <b>Cafetaria</b>.</td></tr>
+  <tr><td>☐</td><td><b>Sluitingsdagen</b> (feestdagen, vakantie) staan erin.</td></tr>
+  <tr><td>☐</td><td>Alle <b>vrij-aanvragen</b> voor die maand zijn goedgekeurd of afgewezen (<i>Aanvragen</i>).</td></tr>
+  <tr><td>☐</td><td><b>Open diensten</b> (rood) bekeken: ingevuld of bewust open gelaten.</td></tr>
+  <tr><td>☐</td><td><b>⚠️ Opmerkingen van de planner</b> gelezen.</td></tr>
+  <tr><td>☐</td><td><b>Uren:</b> niemand ver onder of boven zijn contract.</td></tr>
+  <tr><td>☐</td><td><b>Per persoon:</b> weekenden eerlijk verdeeld, geen rare dubbele diensten.</td></tr>
+  <tr><td>☐</td><td>Geen gele balk <b>🌱 zonder ervaren collega</b> (of bewust zo gelaten).</td></tr>
+  <tr><td>☐</td><td>Tabblad <b>Cafetaria</b> → <b>📤 Cafetaria versturen</b>.</td></tr>
+</table>
+<a class="naar-boven" href="#top">↑ naar boven</a></section>
+
+<footer>Rooster – voorbeeld cafetariarooster · <a href="ricardo.html">Handleiding Ricardo</a></footer>
+</main>
+</body>
+</html>

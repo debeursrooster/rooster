@@ -128,7 +128,7 @@
   }
   // Ziet het personeel deze dienst? (gepubliceerde maand, of feest dat via de uitvraag is ingepland)
   const dienstZichtbaar = d => A.dienstZichtbaar(d);
-  async function meldDienst(d, mwId, tekst) { if (mwId && dienstZichtbaar(d)) await A.melding(mwId, tekst); }
+  async function meldDienst(d, mwId, tekst) { if (mwId && dienstZichtbaar(d) && !A.isBeheer(A.mw(mwId))) await A.melding(mwId, tekst); }
 
   // =====================================================================
   //  OVERZICHT
@@ -344,8 +344,8 @@
       <div id="roosterInhoud"></div>`;
     hoofd.querySelectorAll('#locTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.loc); b.onclick = () => { staat.loc = b.dataset.v; pRooster(); }; });
     hoofd.querySelectorAll('#weergaveTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.weergave); b.onclick = () => { staat.weergave = b.dataset.v; pRooster(); }; });
-    $('#vorige').onclick = () => { staat.maand = G.prevMonth(maand); pRooster(); };
-    $('#volgende').onclick = () => { staat.maand = G.nextMonth(maand); pRooster(); };
+    $('#vorige').onclick = () => { staat.maand = G.prevMonth(maand); staat.dag = null; pRooster(); };
+    $('#volgende').onclick = () => { staat.maand = G.nextMonth(maand); staat.dag = null; pRooster(); };
     const k = id => document.getElementById(id);
     if (k('maakRooster')) k('maakRooster').onclick = e => A.bezig(e.currentTarget, () => maakRooster(maand));
     if (k('maakVoorlopig')) k('maakVoorlopig').onclick = e => A.bezig(e.currentTarget, async () => {
@@ -478,27 +478,24 @@
     const dicht = new Map(d.sluitingsdagen.map(s => [s.datum, s.reden]));
     const eerste = maand + '-01', laatste = G.lastDay(maand);
     let w = G.weekStart(eerste);
-    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span><i class="voorlopig-i"></i>Voorlopig (oproep loopt nog)</span><span>Klik op een dienst om iemand anders in te plannen</span></div>`;
+    let html = `<div class="legenda geen-print"><span><i style="background:var(--caf)"></i>Cafetaria</span><span><i style="background:var(--zaal)"></i>Zalencentrum</span><span><i style="background:var(--fout)"></i>Open dienst</span><span><i class="voorlopig-i"></i>Voorlopig (oproep loopt nog)</span><span>Klik op een dienst om iemand anders in te plannen · <b>Sleep</b> een naam naar een andere dienst om te ruilen, of naar een open plek om te verplaatsen</span></div>`;
     const vlPerDag = {};
     if (staat.loc !== 'cafetaria') for (const x of voorlopig().diensten) (vlPerDag[x.datum] = vlPerDag[x.datum] || []).push(x);
     const heeftRooster = !!A.rooster(maand);
     const ruilIds = new Set(d.ruilverzoeken.filter(r => ['open', 'gevraagd', 'overgenomen'].includes(r.status)).flatMap(r => [r.dienst_id, r.terug_dienst_id]));
     const dienstHtml = ({ x, n, ids }) => { const m = A.mw(x.medewerker_id); const kb = !m && r && r.status === 'voorlopig' && x.locatie === 'cafetaria' ? kanBij(ids) : null; return `<div class="dienst ${x.locatie} ${m ? '' : 'open'} ${ruilIds.has(x.id) ? 'ruil' : ''}" data-id="${x.id}" title="${esc(x.functie)} ${tijd(x)}${n > 1 ? ' – ' + n + ' open plekken' : ''}${kb !== null ? ' – ' + kb + ' oproepkracht(en) kunnen' : ''}">
-            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}${kb !== null ? ` <span class="kanaantal ${kb ? '' : 'nul'}">✓${kb}</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; };
+            ${m ? `<span class="stip" style="background:${esc(m.kleur)}"></span>` : ''}<span class="naam">${m ? (A.isBeheer(m) ? (A.baasOverneembaar(x) ? '⭐ ' : '⭐🔒 ') : '') + esc(m.naam) : `Open${n > 1 ? ` <span class="aantal">${n}×</span>` : ''}${kb !== null ? ` <span class="kanaantal ${kb ? '' : 'nul'}">✓${kb}</span>` : ''}`}<br><span class="fn">${esc(x.functie)}</span></span><span class="tijd">${esc(x.start)}<br>${esc(x.eind)}</span></div>`; };
     // Weekdagen waarop deze maand helemaal niets is (bv. cafetaria dicht op maandag) smal tonen
     const dagenMnd = G.monthDays(maand);
     const leeg = [0, 1, 2, 3, 4, 5, 6].map(wd => !dagenMnd.some(dag => G.weekday(dag) === wd && (diensten.some(x => x.datum === dag) || (staat.loc !== 'cafetaria' && d.zalen_events.some(e => e.datum === dag)))));
     const kolommen = leeg.map(l => l ? 'minmax(46px, .32fr)' : 'minmax(var(--dagmin, 0px), 1fr)').join(' ');
-    while (w <= laatste) {
-      html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen" style="grid-template-columns:${kolommen}">`;
-      for (let i = 0; i < 7; i++) {
-        const dag = G.addDays(w, i);
-        if (G.monthOf(dag) !== maand) { html += '<div class="dag buiten"></div>'; continue; }
+    // Eén dag (ingezoomd) of de hele maand
+    const dagCel = (dag, i, zoom) => {
         const ds = diensten.filter(x => x.datum === dag).sort((a, b) => (a.locatie === b.locatie ? 0 : a.locatie === 'cafetaria' ? -1 : 1) || G.min(a.start) - G.min(b.start));
         const evs = d.zalen_events.filter(e => e.datum === dag && staat.loc !== 'cafetaria');
         const isDicht = dicht.has(dag);
-        html += `<div class="dag ${leeg[i] ? 'smal' : ''} ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
-          <div class="dag-kop"><span>${A.DAG_KORT[i]}</span><span class="nr">${G.parse(dag).getUTCDate()}</span></div>
+        return `<div class="dag ${leeg[i] ? 'smal' : ''} ${dag === nu ? 'vandaag' : ''} ${isDicht && staat.loc !== 'zalen' ? 'dicht' : ''}" data-dag="${dag}">
+          <div class="dag-kop" data-zoom="${dag}" title="Alleen deze dag bekijken"><span>${zoom ? 'Wie werkt er' : A.DAG_KORT[i]}</span><span class="nr">${zoom ? '' : G.parse(dag).getUTCDate()}</span></div>
           ${isDicht && staat.loc !== 'zalen' ? `<span class="label">Cafetaria dicht${dicht.get(dag) ? ' · ' + esc(dicht.get(dag)) : ''}</span>` : ''}
           ${groepOpen(ds.filter(x => !x.event_id || !evs.some(e => e.id === x.event_id))).map(dienstHtml).join('')}
           ${evs.map(e => { const vl = (vlPerDag[dag] || []).filter(x => x.event_id === e.id), vo = vl.filter(x => !x.medewerker_id).length;
@@ -509,13 +506,48 @@
               + groepOpen(ds.filter(x => x.event_id === e.id)).map(dienstHtml).join('') + '</div>'; }).join('')}
           ${heeftRooster && !leeg[i] ? '<button class="plus" data-plus="' + dag + '">+ dienst</button>' : ''}${leeg[i] ? '<span class="zacht smal-tekst">dicht</span>' : ''}
         </div>`;
+    };
+    if (staat.dag && G.monthOf(staat.dag) === maand) {
+      const dag = staat.dag, i = G.weekday(dag);
+      html += `<div class="dagzoom-kop"><button class="knop klein" type="button" id="zoomTerug">← Hele maand</button>
+        <div class="dagzoom-nav"><button class="knop klein" type="button" id="zoomVorige" ${dag <= eerste ? 'disabled' : ''}>◀</button><b>${esc(A.datumLang(dag).replace(/^./, c => c.toUpperCase()))}</b><button class="knop klein" type="button" id="zoomVolgende" ${dag >= laatste ? 'disabled' : ''}>▶</button></div></div>
+        <div class="dagen dagzoom">${dagCel(dag, i, true).replace('class="dag smal', 'class="dag')}</div>`;
+    } else {
+    while (w <= laatste) {
+      html += `<div class="weekblok"><h3>Week ${G.isoWeek(w)}</h3><div class="dagen" style="grid-template-columns:${kolommen}">`;
+      for (let i = 0; i < 7; i++) {
+        const dag = G.addDays(w, i);
+        if (G.monthOf(dag) !== maand) { html += '<div class="dag buiten"></div>'; continue; }
+        html += dagCel(dag, i, false);
       }
       html += '</div></div>';
       w = G.addDays(w, 7);
     }
+    }
     el.innerHTML = html;
     el.querySelectorAll('.dienst:not(.voorlopig)').forEach(x => x.onclick = () => dienstModal(A.data.diensten.find(y => y.id === x.dataset.id)));
+    // Slepen: naam op een andere dienst = ruilen, op een open plek = verplaatsen
+    let sleep = null;
+    el.querySelectorAll('.dienst:not(.voorlopig)').forEach(x => {
+      x.draggable = true;
+      x.addEventListener('dragstart', ev => { sleep = x.dataset.id; x.classList.add('sleept'); ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', sleep); } catch (e2) { } });
+      x.addEventListener('dragend', () => { x.classList.remove('sleept'); el.querySelectorAll('.drop-hier').forEach(y => y.classList.remove('drop-hier')); });
+      x.addEventListener('dragover', ev => { if (sleep && sleep !== x.dataset.id) { ev.preventDefault(); x.classList.add('drop-hier'); } });
+      x.addEventListener('dragleave', () => x.classList.remove('drop-hier'));
+      x.addEventListener('drop', async ev => {
+        ev.preventDefault(); x.classList.remove('drop-hier');
+        const van = A.data.diensten.find(y => y.id === sleep), naar = A.data.diensten.find(y => y.id === x.dataset.id); sleep = null;
+        if (!van || !naar || van.id === naar.id) return;
+        if (van.medewerker_id && naar.medewerker_id) return ruilDiensten(van, naar);
+        if (van.medewerker_id && !naar.medewerker_id) return verplaatsNaarOpen(van, naar);
+        if (!van.medewerker_id && naar.medewerker_id) return verplaatsNaarOpen(naar, van);
+      });
+    });
     el.querySelectorAll('[data-plus]').forEach(x => x.onclick = () => dienstModal(null, x.dataset.plus));
+    el.querySelectorAll('[data-zoom]').forEach(x => x.onclick = () => { staat.dag = x.dataset.zoom; pRooster(); window.scrollTo(0, 0); });
+    const zt = el.querySelector('#zoomTerug'); if (zt) zt.onclick = () => { staat.dag = null; pRooster(); };
+    const zv = el.querySelector('#zoomVorige'); if (zv) zv.onclick = () => { staat.dag = G.addDays(staat.dag, -1); pRooster(); };
+    const zn = el.querySelector('#zoomVolgende'); if (zn) zn.onclick = () => { staat.dag = G.addDays(staat.dag, 1); pRooster(); };
     el.querySelectorAll('[data-ev]').forEach(x => x.onclick = () => eventModal(A.event(x.dataset.ev)));
   }
 
@@ -814,6 +846,70 @@
   }
 
   // ---------- dienst bewerken / toevoegen ----------
+  // ---------- Twee mensen hun diensten laten ruilen (bv. Lisa ⇄ Emma) ----------
+  // Kandidaten: diensten van collega's op dezelfde dag of tot 3 dagen ervoor/erna, waarbij we laten zien of het past.
+  function ruilOpties(d) {
+    const a = A.mw(d.medewerker_id); if (!a) return [];
+    const van = G.addDays(d.datum, -3), tot = G.addDays(d.datum, 3);
+    const lijst = A.data.diensten.filter(x => x.id !== d.id && x.medewerker_id && x.medewerker_id !== a.id && x.datum >= van && x.datum <= tot && !(x.event_id && x.event_id === d.event_id && x.functie === d.functie && x.start === d.start && x.eind === d.eind));
+    return lijst.map(x => {
+      const b = A.mw(x.medewerker_id); if (!b || G.isInhuur(b)) return null;
+      const ctx = G.context(A.data, A.data.diensten.filter(y => y.id !== d.id && y.id !== x.id));
+      const ka = A.isBeheer(a) ? { ok: true, redenen: [] } : G.beoordeel(ctx, a, { ...x, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true });
+      const kb = A.isBeheer(b) ? { ok: true, redenen: [] } : G.beoordeel(ctx, b, { ...d, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true });
+      const bezwaar = [!ka.ok && `${a.naam}: ${ka.redenen[0]}`, !kb.ok && `${b.naam}: ${kb.redenen[0]}`].filter(Boolean);
+      return { x, b, ok: !bezwaar.length, bezwaar, zelfdeDag: x.datum === d.datum };
+    }).filter(Boolean).sort((p, q) => (q.zelfdeDag - p.zelfdeDag) || (q.ok - p.ok) || p.x.datum.localeCompare(q.x.datum) || G.min(p.x.start) - G.min(q.x.start));
+  }
+  function ruilBlokHtml(d) {
+    if (!d || !d.medewerker_id || !A.mw(d.medewerker_id)) return '';
+    const a = A.mw(d.medewerker_id), opties = ruilOpties(d);
+    const rij = o => `<div class="ruil-optie ${o.ok ? '' : 'let'}">
+        <div style="min-width:0"><b>${esc(o.b.naam)}</b> <span class="zacht">${o.zelfdeDag ? 'zelfde dag' : esc(A.datumKort(o.x.datum))} · ${esc(o.x.start)}–${esc(o.x.eind)} · ${esc(o.x.functie)}${o.x.event_id && A.event(o.x.event_id) ? ' · 🎉 ' + esc(A.event(o.x.event_id).naam) : ''}</span>
+          <div class="r">${o.ok ? '<span style="color:var(--ok)">✓ past voor allebei</span>' : '⚠️ ' + esc(o.bezwaar.join(' · '))}</div></div>
+        <button type="button" class="knop klein ${o.ok ? 'primair' : ''}" data-ruilmet="${o.x.id}">⇄ Ruilen</button></div>`;
+    // eerst wat goed past (zelfde dag bovenaan), de rest ingeklapt
+    const goed = opties.filter(o => o.ok), minder = opties.filter(o => !o.ok);
+    const dag = goed.filter(o => o.zelfdeDag), rest = goed.filter(o => !o.zelfdeDag);
+    return `<details class="ruil-blok"><summary>🔁 Ruilen met een collega <small class="zacht">${esc(a.naam)} krijgt de dienst van de ander, en andersom</small></summary>
+      ${dag.length ? `<h4>Zelfde dag</h4>${dag.map(rij).join('')}` : ''}${rest.length ? `<h4>Paar dagen ervoor of erna</h4>${rest.slice(0, 10).map(rij).join('')}` : ''}
+      ${!goed.length ? `<p class="zacht" style="margin:.5em 0">Geen ruil die voor allebei goed past (functie, vrij, al aan het werk).</p>` : ''}
+      ${minder.length ? `<details class="ruil-minder"><summary>Toch ruilen met iemand bij wie het niet goed past (${minder.length})</summary>${minder.slice(0, 15).map(rij).join('')}</details>` : ''}</details>`;
+  }
+  // Iemand van zijn dienst naar een open plek zetten; zijn oude dienst wordt open
+  async function verplaatsNaarOpen(van, open) {
+    const m = A.mw(van.medewerker_id); if (!m) return;
+    const ctx = G.context(A.data, A.data.diensten.filter(y => y.id !== van.id && y.id !== open.id));
+    const k = A.isBeheer(m) ? { ok: true } : G.beoordeel(ctx, m, { ...open, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true });
+    const omschr = d => `${A.datumKort(d.datum)} ${d.start}–${d.eind} · ${d.functie}${d.event_id && A.event(d.event_id) ? ' · 🎉 ' + A.event(d.event_id).naam : ''}`;
+    const zichtbaar = dienstZichtbaar(van) || dienstZichtbaar(open);
+    if (!await A.modal('Verplaatsen', `<p><b>${esc(m.naam)}</b> gaat van <b>${esc(omschr(van))}</b> naar <b>${esc(omschr(open))}</b>.</p><p>De dienst van ${esc(omschr(van))} wordt <b>open</b>.</p>
+        ${k.ok ? '' : `<p style="color:var(--let)"><b>Let op:</b> ${esc(m.naam)}: ${esc(k.redenen[0])}</p>`}
+        <p class="zacht">${zichtbaar ? `Het rooster is al verstuurd: ${esc(m.naam)} krijgt een bericht.` : 'Het rooster is nog niet verstuurd, dus er gaan geen berichten uit.'}</p>`,
+      [{ label: 'Annuleren', waarde: false }, { label: 'Verplaatsen', soort: 'primair', waarde: true }])) return;
+    await Store.update('diensten', open.id, { medewerker_id: m.id });
+    await Store.update('diensten', van.id, { medewerker_id: null });
+    if (zichtbaar && !A.isBeheer(m)) await A.melding(m.id, `🔁 Je dienst is verplaatst: je werkt nu ${A.datumLang(open.datum)} ${open.start}–${open.eind} (${open.functie}) in plaats van ${A.datumLang(van.datum)} ${van.start}–${van.eind}.`);
+    await herlaad(); opnieuw();
+    A.toast(`${m.naam} verplaatst – de oude dienst staat open`, 'ok');
+  }
+  async function ruilDiensten(d1, d2) {
+    const a = A.mw(d1.medewerker_id), b = A.mw(d2.medewerker_id); if (!a || !b) return;
+    const o = ruilOpties(d1).find(x => x.x.id === d2.id);
+    const regel = (m, d) => `<li><b>${esc(m.naam)}</b> → ${esc(A.datumKort(d.datum))} ${esc(d.start)}–${esc(d.eind)} · ${esc(d.functie)}${d.event_id && A.event(d.event_id) ? ' · 🎉 ' + esc(A.event(d.event_id).naam) : ''}</li>`;
+    const zichtbaar = dienstZichtbaar(d1) || dienstZichtbaar(d2);
+    if (!await A.modal('Diensten ruilen', `<p>Na het ruilen:</p><ul>${regel(a, d2)}${regel(b, d1)}</ul>
+        ${o && !o.ok ? `<p style="color:var(--let)"><b>Let op:</b> ${esc(o.bezwaar.join(' · '))}</p>` : ''}
+        <p class="zacht">${zichtbaar ? 'Het rooster is al verstuurd: allebei krijgen ze een bericht.' : 'Het rooster is nog niet verstuurd, dus er gaan geen berichten uit.'}</p>`,
+      [{ label: 'Annuleren', waarde: false }, { label: '⇄ Ruilen', soort: 'primair', waarde: true }])) return;
+    await Store.update('diensten', d1.id, { medewerker_id: b.id });
+    await Store.update('diensten', d2.id, { medewerker_id: a.id });
+    const tekst = (d, oud) => `🔁 Je dienst is geruild: je werkt nu ${A.datumLang(d.datum)} ${d.start}–${d.eind} (${d.functie}) in plaats van ${A.datumLang(oud.datum)} ${oud.start}–${oud.eind}.`;
+    if (zichtbaar) { if (!A.isBeheer(a)) await A.melding(a.id, tekst(d2, d1)); if (!A.isBeheer(b)) await A.melding(b.id, tekst(d1, d2)); }
+    await herlaad(); opnieuw();
+    A.toast(`${a.naam} en ${b.naam} hebben geruild${zichtbaar ? ' – allebei kregen een bericht' : ''}`, 'ok');
+  }
+
   async function dienstModal(dienst, nieuweDatum) {
     const nieuw = !dienst;
     const d = dienst ? { ...dienst } : { id: Store.uuid(), maand: G.monthOf(nieuweDatum), datum: nieuweDatum, locatie: staat.loc === 'zalen' ? 'zalen' : 'cafetaria', event_id: null, start: '16:00', eind: '21:00', functie: (A.data.instellingen.functies || [])[0], medewerker_id: null, notitie: '' };
@@ -831,18 +927,67 @@
       </div>
       <div class="veld ${evs.length ? '' : 'verborgen'}" id="dEvWrap"><label>Bij feest</label><select id="dEv"><option value="">– geen –</option>${evs.map(e => `<option value="${e.id}" ${e.id === d.event_id ? 'selected' : ''}>${esc(e.naam)}</option>`).join('')}</select></div>
       <div class="veld"><label>Wie werkt er? <small>(beste keuze bovenaan)</small></label><div class="kand-lijst" id="kandLijst"></div></div>
+      ${ruilBlokHtml(dienst)}
       <div class="veld"><label>Notitie</label><input id="dNot" value="${esc(d.notitie || '')}" placeholder="bv. sleutel ophalen bij…"></div>`;
-    const lees = bg => ({ ...d, locatie: bg.querySelector('#dLoc').value, functie: bg.querySelector('#dFn').value, start: bg.querySelector('#dStart').value, eind: bg.querySelector('#dEind').value, event_id: bg.querySelector('#dEv').value || null, notitie: bg.querySelector('#dNot').value, medewerker_id: gekozen });
+    const lees = bg => ({ ...d, locatie: bg.querySelector('#dLoc').value, functie: bg.querySelector('#dFn').value, start: bg.querySelector('#dStart').value, eind: bg.querySelector('#dEind').value, event_id: bg.querySelector('#dEv').value || null, notitie: bg.querySelector('#dNot').value, medewerker_id: gekozen,
+      // alleen meesturen als het ertoe doet (de kolom bestaat pas na update-1.9.23.sql)
+      ...((gekozen === '__beheer' || (beheerMw() && gekozen === beheerMw().id)) && !overnemen ? { baas_overname: false } : d.baas_overname === false ? { baas_overname: null } : {}) });
+    let overnemen = d.baas_overname !== false;   // mag het personeel de dienst van de baas overnemen?
+    // Wat gebeurt er met de ander als je iemand anders kiest? (overnemen / ruilen / naar een open plek / andere dienst open)
+    let aktie = 'over';
+    const kort = y => `${A.datumKort(y.datum)} ${y.start}–${y.eind} ${y.functie}${y.event_id && A.event(y.event_id) ? ' (' + A.event(y.event_id).naam + ')' : ''}`;
+    const van_ = n => n + (/[aeiouy]$/i.test(n) ? "'s" : 's');   // Lisa's, Mark's → Marks
+    const aktieHtml = (m, slot) => {
+      const oud = dienst && A.mw(dienst.medewerker_id);
+      const rest = A.data.diensten.filter(y => y.id !== d.id);
+      const ctx = G.context(A.data, rest.filter(y => y.medewerker_id !== m.id || true));
+      const opties = [];
+      const radio = (v, html) => `<label class="kand-aktie"><input type="radio" name="kAktie" value="${v}" ${aktie === v ? 'checked' : ''}> <span>${html}</span></label>`;
+      // 1. gewoon overnemen
+      opties.push(radio('over', oud ? `<b>${esc(m.naam)} neemt over</b> – ${esc(oud.naam)} is dan vrij` : `<b>${esc(m.naam)} inplannen</b>`));
+      // 2. tegelijk al ergens anders: die dienst wordt open
+      for (const y of rest.filter(y => y.medewerker_id === m.id && y.datum === slot.datum && G.overlap(y, slot)))
+        opties.push(radio('vrij:' + y.id, `<b>${esc(van_(m.naam))} dienst ${esc(kort(y))} wordt open</b> <span class="zacht">(werkt dan al)</span>`));
+      if (oud && !A.isBeheer(oud)) {
+        // 3. ruilen: de ander neemt een dienst van deze persoon over (zelfde dag of paar dagen ervoor/erna)
+        const van = G.addDays(slot.datum, -3), tot = G.addDays(slot.datum, 3);
+        const ruilen = rest.filter(y => y.medewerker_id === m.id && y.datum >= van && y.datum <= tot).map(y => {
+          const c2 = G.context(A.data, rest.filter(z => z.id !== y.id)); return { y, k2: G.beoordeel(c2, oud, { ...y, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true }) }; })
+          .sort((p, q) => (q.k2.ok - p.k2.ok) || (q.y.datum === slot.datum) - (p.y.datum === slot.datum) || p.y.datum.localeCompare(q.y.datum)).slice(0, 5);
+        for (const { y, k2 } of ruilen)
+          opties.push(radio('ruil:' + y.id, `<b>Ruilen:</b> ${esc(oud.naam)} krijgt ${esc(van_(m.naam))} dienst ${esc(kort(y))} ${k2.ok ? '<span style="color:var(--ok)">✓</span>' : `<span style="color:var(--let)">⚠️ ${esc(k2.redenen[0])}</span>`}`));
+        // 4. de ander naar een open plek (zelfde dag)
+        const gehad = new Set();
+        for (const y of rest.filter(y => !y.medewerker_id && y.datum === slot.datum)) {
+          const sl = [y.functie, y.start, y.eind, y.event_id || ''].join('|'); if (gehad.has(sl) || gehad.size >= 4) continue; gehad.add(sl);
+          const k3 = G.beoordeel(ctx, oud, { ...y, medewerker_id: null }, { negeerUitvraag: true, negeerReactie: true });
+          if (!k3.ok && /functie|werkt niet in/.test(k3.redenen[0] || '')) continue;
+          opties.push(radio('open:' + y.id, `<b>${esc(oud.naam)} naar de open plek</b> ${esc(kort(y))} ${k3.ok ? '<span style="color:var(--ok)">✓</span>' : `<span style="color:var(--let)">⚠️ ${esc(k3.redenen[0])}</span>`}`));
+        }
+      }
+      return opties.length > 1 ? `<div class="kand-akties">${opties.join('')}</div>` : '';
+    };
     const tekenKand = bg => {
       const slot = lees(bg);
       const ctx = G.context(A.data, A.data.diensten.filter(x => x.id !== d.id));
-      const k = G.kandidaten(ctx, slot);
+      const k = G.kandidaten(ctx, slot).filter(x => !A.isBeheer(x.m));
       const lijst = bg.querySelector('#kandLijst');
+      // de baas zelf: altijd te kiezen (staat niet als personeel in de lijst, want hij is geen 'actieve' medewerker)
+      const baas = beheerMw(), baasGekozen = gekozen === '__beheer' || (baas && gekozen === baas.id);
+      const baasDubbel = baas && A.data.diensten.some(x => x.id !== d.id && x.medewerker_id === baas.id && x.datum === slot.datum && G.overlap(x, slot));
       lijst.innerHTML = `<div class="kand ${!gekozen ? 'gekozen' : ''}" data-k=""><span class="avatar" style="background:#d9cfc0;width:30px;height:30px">–</span><div><b>Open laten</b><div class="r">personeel kan hem zelf oppakken</div></div></div>` +
+        `<div class="kand ${baasGekozen ? 'gekozen' : ''}" data-k="__beheer"><span class="avatar" style="background:#c9a227;width:30px;height:30px">⭐</span><div style="min-width:0"><b>${esc(beheerNaam())} zelf</b><div class="r">${baasDubbel ? '⚠️ staat dan al ergens anders ingepland' : 'je doet deze dienst zelf'}</div>
+          ${baasGekozen ? `<label class="check kand-over"><input type="checkbox" id="dOver" ${overnemen ? 'checked' : ''}> Personeel mag deze dienst overnemen <small class="zacht">${overnemen ? '(⭐ blijft beschikbaar in de app)' : '(🔒 je houdt hem zelf)'}</small></label>` : ''}</div></div>` +
         k.map(x => { const u = urenVan(x.m.id, slot.maand) - (dienst && dienst.medewerker_id === x.m.id ? G.hours(dienst.start, dienst.eind) : 0); const doel = G.doelUren(x.m, slot.maand);
-          return `<div class="kand ${x.ok ? '' : 'nee'} ${gekozen === x.m.id ? 'gekozen' : ''}" data-k="${x.m.id}">${avatar(x.m).replace('avatar"', 'avatar" ')}<div><b>${esc(x.m.naam)}</b><div class="r">${x.ok ? esc(x.redenen.join(' · ') || 'beschikbaar') : '⛔ ' + esc(x.redenen.join(', '))}</div></div><span class="sc">${A.uren(u)}${doel ? '/' + Math.round(doel) : ''} u</span></div>`; }).join('');
+          return `<div class="kand ${x.ok ? '' : 'nee'} ${gekozen === x.m.id ? 'gekozen' : ''}" data-k="${x.m.id}">${avatar(x.m).replace('avatar"', 'avatar" ')}<div style="min-width:0"><b>${esc(x.m.naam)}</b><div class="r">${x.ok ? esc(x.redenen.join(' · ') || 'beschikbaar') : '⛔ ' + esc(x.redenen.join(', '))}</div>${gekozen === x.m.id && (!dienst || dienst.medewerker_id !== x.m.id) ? aktieHtml(x.m, slot) : ''}</div><span class="sc">${A.uren(u)}${doel ? '/' + Math.round(doel) : ''} u</span></div>`; }).join('');
+      lijst.querySelectorAll('.kand-aktie').forEach(l => { l.onclick = ev => ev.stopPropagation(); });
+      lijst.querySelectorAll('input[name=kAktie]').forEach(r => r.onchange = () => { aktie = r.value; });
+      const ov = lijst.querySelector('#dOver');
+      if (ov) { ov.closest('label').onclick = ev => ev.stopPropagation(); ov.onchange = () => { overnemen = ov.checked; tekenKand(bg); }; }
       lijst.querySelectorAll('.kand').forEach(el => el.onclick = async () => {
         const id = el.dataset.k || null;
+        if (id !== gekozen) aktie = 'over';
+        if (id === '__beheer') { gekozen = '__beheer'; tekenKand(bg); return; }
         if (id && el.classList.contains('nee') && !await A.bevestig('Toch inplannen?', 'Deze medewerker is eigenlijk niet beschikbaar (' + el.querySelector('.r').textContent.replace('⛔ ', '') + '). Toch inplannen?', 'Toch inplannen')) return;
         gekozen = id; tekenKand(bg);
       });
@@ -852,9 +997,15 @@
     knoppen.push({ label: 'Annuleren', waarde: null }, { label: 'Opslaan', soort: 'primair', waarde: bg => lees(bg), controle: bg => (!bg.querySelector('#dStart').value || !bg.querySelector('#dEind').value) ? 'Vul begin- en eindtijd in' : null });
     const res = await A.modal(nieuw ? 'Dienst toevoegen' : 'Dienst aanpassen', html, knoppen, bg => {
       tekenKand(bg);
+      bg.querySelectorAll('[data-ruilmet]').forEach(k => k.onclick = async () => {
+        const x = A.data.diensten.find(y => y.id === k.dataset.ruilmet); if (!x) return;
+        bg.querySelector('.sluit').click();
+        await ruilDiensten(dienst, x);
+      });
       ['#dLoc', '#dFn', '#dStart', '#dEind'].forEach(s => bg.querySelector(s).addEventListener('change', () => tekenKand(bg)));
     });
     if (!res) return;
+    if (res !== 'weg' && res.medewerker_id === '__beheer') res.medewerker_id = (await zorgBeheerMw([res.functie])).id;
     const pub = dienstZichtbaar(d);
     if (res === 'weg') {
       await Store.remove('diensten', d.id);
@@ -867,14 +1018,28 @@
       const { id, ...patch } = res;
       await Store.update('diensten', d.id, patch);
       if (pub && dienst.medewerker_id !== res.medewerker_id) {
-        if (dienst.medewerker_id) await A.melding(dienst.medewerker_id, `Je dienst op ${A.datumLang(d.datum)} (${dienst.start}–${dienst.eind}) is aan iemand anders gegeven.`);
-        if (res.medewerker_id) await A.melding(res.medewerker_id, `Je bent ingepland op ${A.datumLang(res.datum)} van ${res.start} tot ${res.eind} (${A.LOC[res.locatie]}, ${res.functie}).`);
+        if (dienst.medewerker_id && !/^(ruil|open):/.test(aktie) && !A.isBeheer(A.mw(dienst.medewerker_id))) await A.melding(dienst.medewerker_id, `Je dienst op ${A.datumLang(d.datum)} (${dienst.start}–${dienst.eind}) is aan iemand anders gegeven.`);
+        if (res.medewerker_id && !A.isBeheer(A.mw(res.medewerker_id))) await A.melding(res.medewerker_id, `Je bent ingepland op ${A.datumLang(res.datum)} van ${res.start} tot ${res.eind} (${A.LOC[res.locatie]}, ${res.functie}).`);
       } else if (pub && res.medewerker_id && (dienst.start !== res.start || dienst.eind !== res.eind)) {
         await A.melding(res.medewerker_id, `Je dienst op ${A.datumLang(res.datum)} is gewijzigd naar ${res.start}–${res.eind}.`);
       }
     }
+    // extra keuze bij het wisselen uitvoeren
+    if (res !== 'weg' && aktie !== 'over' && res.medewerker_id) {
+      const [soort, yid] = aktie.split(':'), y = A.data.diensten.find(z => z.id === yid), oud = dienst && A.mw(dienst.medewerker_id), nieuwM = A.mw(res.medewerker_id);
+      if (y) {
+        const zicht = dienstZichtbaar(y);
+        if (soort === 'vrij') { await Store.update('diensten', y.id, { medewerker_id: null });
+          if (zicht && nieuwM && !A.isBeheer(nieuwM)) await A.melding(nieuwM.id, `🔁 Je dienst van ${A.datumLang(y.datum)} ${y.start}–${y.eind} vervalt; je werkt nu ${res.start}–${res.eind} (${res.functie}).`); }
+        if ((soort === 'ruil' || soort === 'open') && oud) {
+          await Store.update('diensten', y.id, { medewerker_id: oud.id });
+          if (zicht && !A.isBeheer(oud)) await A.melding(oud.id, `🔁 Je dienst is gewijzigd: je werkt nu ${A.datumLang(y.datum)} ${y.start}–${y.eind} (${y.functie}) in plaats van ${A.datumLang(d.datum)} ${dienst.start}–${dienst.eind}.`);
+        }
+        if (soort === 'ruil' && zicht && nieuwM && !A.isBeheer(nieuwM)) await A.melding(nieuwM.id, `🔁 Je dienst van ${A.datumLang(y.datum)} ${y.start}–${y.eind} is geruild met ${A.datumLang(res.datum)} ${res.start}–${res.eind}.`);
+      }
+    }
     await herlaad(); opnieuw();
-    A.toast('Opgeslagen', 'ok');
+    A.toast(aktie.startsWith('ruil') ? 'Geruild' : aktie.startsWith('open') ? 'Opgeslagen – de ander staat nu op de open plek' : aktie.startsWith('vrij') ? 'Opgeslagen – de andere dienst staat nu open' : 'Opgeslagen', 'ok');
   }
 
   // =====================================================================
