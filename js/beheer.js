@@ -560,17 +560,29 @@
     const open = ds.filter(x => !x.medewerker_id), fns = [...new Set(ds.map(x => x.functie))];
     const bev = new Set(A.data.event_reacties.filter(r => r.event_id === e.id && r.kan && r.bevestigd_functie).map(r => r.medewerker_id));
     const nodig = fns.map(f => [f, open.filter(x => x.functie === f).length]).filter(([, n]) => n);
+    // Tijd van een plek (nog niet vast wie): wijzigen splitst de regel in de bezetting, bv. 1× Bar 18:00 en 1× Bar 20:00
+    const plekTijd = (x, chip) => { const k = esc([x.functie, x.start, x.eind].join('|')), afw = x.start !== e.start || x.eind !== e.eind;
+      return `<div class="ind-plek${afw ? ' afwijkend' : ''}">${chip}
+        <span class="ind-tijd"><input type="time" data-vpstart="${k}" value="${esc(x.start)}" aria-label="Begintijd van deze plek"> – <input type="time" data-vpeind="${k}" value="${esc(x.eind)}" aria-label="Eindtijd van deze plek">
+        <small class="zacht">${A.uren(G.hours(x.start, x.eind))} u</small></span></div>`; };
     const naam = x => { const m = A.mw(x.medewerker_id);
       const teken = A.isBeheer(m) ? '⭐ ' : G.isInhuur(m) ? '🧑‍🍳 ' : bev.has(m.id) ? '🔒 ' : `<span class="stip" style="background:${esc(m.kleur)}"></span>`;
-      return `<span class="indeling-naam${A.isBeheer(m) ? ' baas' : ''}">${teken}${esc(m.naam)}</span>`; };
+      const chip = `<span class="indeling-naam${A.isBeheer(m) ? ' baas' : ''}">${teken}${esc(m.naam)}</span>`;
+      // wie vast staat (bevestigd, de baas zelf of inhuur) kan nu al een eigen begin- en eindtijd krijgen
+      if (!(A.isBeheer(m) || G.isInhuur(m) || bev.has(m.id))) return plekTijd(x, chip);
+      const k = esc(x.functie + '|' + m.id), afw = x.start !== e.start || x.eind !== e.eind;
+      return `<div class="ind-plek${afw ? ' afwijkend' : ''}">${chip}
+        <span class="ind-tijd"><input type="time" data-vtstart="${k}" value="${esc(x.start)}" aria-label="Begintijd"> – <input type="time" data-vteind="${k}" value="${esc(x.eind)}" aria-label="Eindtijd">
+        <small class="zacht">${A.uren(G.hours(x.start, x.eind))} u</small></span></div>`; };
     return `<div class="indeling">
       <div class="indeling-kop"><b>📋 Zo staat het nu (voorlopig)</b>
         <span class="label ${open.length ? 'fout' : 'ok'}">${open.length ? `nog ${open.length} in te vullen` : 'alles ingevuld'}</span></div>
       ${nodig.length ? `<p style="margin:.2em 0 .5em;color:var(--fout);font-weight:700">Nog nodig: ${nodig.map(([f, n]) => `${n}× ${esc(f)}`).join(', ')}</p>` : ''}
       ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
-          <div class="indeling-namen">${rij.map(x => x.medewerker_id ? naam(x) : '<span class="indeling-naam open">Open</span>').join('')}</div></div>`; }).join('')}
-      <p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Met de reacties van nu; vast personeel telt mee. 🔒 = bevestigd · ⭐ = ${esc(beheerNaam())} · 🧑‍🍳 = inhuur. Wie nog niet reageerde, staat hier niet bij. Pas na "Nu indelen" (of na de termijn) kun je schuiven.</p>
+          <div class="indeling-namen met-tijd">${rij.map(x => x.medewerker_id ? naam(x) : plekTijd(x, '<span class="indeling-naam open">Open</span>')).join('')}</div></div>`; }).join('')}
+      <p class="zacht" style="font-size:.8rem;margin:.4em 0 0">Met de reacties van nu; vast personeel telt mee. 🔒 = bevestigd · ⭐ = ${esc(beheerNaam())} · 🧑‍🍳 = inhuur. Wie nog niet reageerde, staat hier niet bij.
+        <b>Tijden aanpassen kan nu al:</b> bij een plek (bv. één Bar om 18:00, de andere om 20:00) of bij wie vaststaat (🔒 ⭐ 🧑‍🍳). Dat blijft bij het indelen staan. Iemand vastzetten? Tik hieronder bij een “kan” op <b>Bevestigen</b>. Schuiven en eraf halen kan na “Nu indelen” (of na de termijn).</p>
     </div>`;
   }
 
@@ -1129,7 +1141,7 @@
     if (ruilAangeboden >= 4) let_.push(`biedt vaak diensten aan (${ruilAangeboden}× in 3 mnd)`);
     return { uv, gewerkt, opgepakt, ruilAangeboden, ruilOvergenomen, vrij, vrijDagen, uren, doel, vz, goed, let: let_ };
   }
-  const oordeelLabel = st => st.let.length ? '<span class="label let">⚠️ let op</span>' : st.goed.length ? '<span class="label ok">👍 goed</span>' : '<span class="label">–</span>';
+  const oordeelLabel = st => st.let.length ? '<span class="label let">⚠️ let op</span>' : st.goed.length ? '<span class="label ok">👍 goed</span>' : '<small class="zacht" title="Nog geen oproepen, diensten of ziekmeldingen om iets over te zeggen">nog niets te zeggen</small>';
 
   function pMedewerker(mid) {
     const m = A.mw(mid);
@@ -1657,6 +1669,11 @@
         const ruimte = Math.max(0, b.aantal - (+b.baas || 0));
         if (ruimte && inhRest[b.functie].length) b.inhuur = inhRest[b.functie].splice(0, ruimte);
       }
+      // eigen tijden per persoon (vastgelegd in de voorspelling) bewaren: op de eerste regel van die functie
+      const huidig = (A.event(e.id) || e).bezetting || [], tijden = {};
+      for (const b of huidig) if (b.tijden) tijden[b.functie] = { ...(tijden[b.functie] || {}), ...b.tijden };
+      const gehad = new Set();
+      for (const b of bez) if (tijden[b.functie] && !gehad.has(b.functie)) { b.tijden = tijden[b.functie]; gehad.add(b.functie); }
       return bez;
     };
     const tekenBaas = bg => {
@@ -1762,6 +1779,43 @@
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
       }));
       // eigen tijden per persoon opslaan
+      // tijd van een plek wijzigen in de voorspelling: regel in de bezetting splitsen
+      bg.querySelectorAll('[data-vpstart], [data-vpeind]').forEach(inp => inp.onchange = () => A.bezig(null, async () => {
+        const rij = inp.closest('.ind-tijd'), start = rij.querySelector('[data-vpstart]').value, eind = rij.querySelector('[data-vpeind]').value;
+        if (!start || !eind) return;
+        const [f, oudS, oudE] = (inp.dataset.vpstart || inp.dataset.vpeind).split('|');
+        if (start === oudS && eind === oudE) return;
+        const ev0 = A.event(e.id), bez = (ev0.bezetting || []).map(b => ({ ...b }));
+        const i = bez.findIndex(b => b.functie === f && (b.start || ev0.start) === oudS && (b.eind || ev0.eind) === oudE);
+        if (i < 0) return A.toast('Deze plek kon ik niet terugvinden; pas de tijd aan bij Benodigd personeel', 'fout');
+        const nieuwS = start === ev0.start ? undefined : start, nieuwE = eind === ev0.eind ? undefined : eind;
+        const vrij = (+bez[i].aantal || 0) - (+bez[i].baas || 0) - ((bez[i].inhuur || []).length);
+        if ((+bez[i].aantal || 0) > 1 && vrij >= 1) {
+          bez[i].aantal = +bez[i].aantal - 1;
+          // bestaat er al een regel met precies die tijden (zonder baas/inhuur)? dan daar één bij
+          const j = bez.findIndex(b => b.functie === f && (b.start || ev0.start) === start && (b.eind || ev0.eind) === eind && !b.baas && !(b.inhuur || []).length);
+          if (j >= 0) bez[j].aantal = +bez[j].aantal + 1; else bez.splice(i + 1, 0, { functie: f, aantal: 1, ...(nieuwS ? { start: nieuwS } : {}), ...(nieuwE ? { eind: nieuwE } : {}) });
+        } else { bez[i].start = nieuwS; bez[i].eind = nieuwE; if (!nieuwS) delete bez[i].start; if (!nieuwE) delete bez[i].eind; }
+        await Store.update('zalen_events', ev0.id, { bezetting: bez });
+        bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
+        A.toast(`${f}: één plek nu ${start}–${eind}`, 'ok');
+      }));
+      // eigen tijd vastleggen terwijl de oproep nog loopt (in de bezetting van het feest)
+      bg.querySelectorAll('[data-vtstart], [data-vteind]').forEach(inp => inp.onchange = () => A.bezig(null, async () => {
+        if (!inp.value) return;
+        const [f, mid] = (inp.dataset.vtstart || inp.dataset.vteind).split('|');
+        const ev0 = A.event(e.id), rij = inp.closest('.ind-tijd');
+        const start = rij.querySelector('[data-vtstart]').value, eind = rij.querySelector('[data-vteind]').value;
+        let gezet = false;
+        const bez = (ev0.bezetting || []).map(b => { if (b.functie !== f || gezet) return b; gezet = true; const c = { ...b, tijden: { ...(b.tijden || {}) } };
+          const std = [b.start || ev0.start, b.eind || ev0.eind];
+          if (start === std[0] && eind === std[1]) delete c.tijden[mid]; else c.tijden[mid] = [start, eind];
+          if (!Object.keys(c.tijden).length) delete c.tijden; return c; });
+        await Store.update('zalen_events', ev0.id, { bezetting: bez }); ev0.bezetting = bez;
+        rij.querySelector('small').textContent = A.uren(G.hours(start, eind)) + ' u';
+        rij.closest('.ind-plek').classList.toggle('afwijkend', start !== ev0.start || eind !== ev0.eind);
+        A.toast(`${A.mwNaam(mid)}: ${start}–${eind} vastgelegd – blijft staan bij het indelen`, 'ok');
+      }));
       bg.querySelectorAll('[data-tstart], [data-teind]').forEach(inp => inp.onchange = () => A.bezig(null, async () => {
         const id = inp.dataset.tstart || inp.dataset.teind, d = A.data.diensten.find(x => x.id === id); if (!d || !inp.value) return;
         const veld = inp.dataset.tstart ? 'start' : 'eind'; if (d[veld] === inp.value) return;
@@ -1908,6 +1962,7 @@
       if (dienst.medewerker_id) G.registreer(ctx, dienst);
       nieuw.push(dienst);
     }
+    G.pasEigenTijdenToe(nieuw, { [ev.id]: ev });
     await Store.insert('diensten', nieuw);
     const pub = eventZichtbaar(ev);
     if (pub) {
@@ -2063,7 +2118,7 @@
     hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwKaartjes" type="button">🪪 Alle uitnodigingen printen</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th>Beeld</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
-        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}${m.langdurig_ziek ? ' <span class="label fout">langdurig ziek</span>' : ''}${m.actief !== false && G.ervaring(m) === 'nieuw' ? ' <span class="label let">🌱 nieuw</span>' : ''}${m.actief !== false && G.ervaring(m) === 'leiding' ? ' <span class="label ok">👑</span>' : ''}${m.actief !== false && m.niveau ? ` <span class="label" title="niveau ${G.niveau(m)} van 5">${'★'.repeat(G.niveau(m))}</span>` : ''}${m.actief !== false && G.leeftijd(m) != null && G.leeftijd(m) < 18 ? ` <span class="label let">${G.leeftijd(m)} jr</span>` : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}${m.langdurig_ziek ? ' <span class="label fout">langdurig ziek</span>' : ''}${m.actief !== false && G.ervaring(m) === 'nieuw' ? ' <span class="label let">🌱 nieuw</span>' : ''}${m.actief !== false && G.ervaring(m) === 'leiding' ? ' <span class="label ok">👑</span>' : ''}${m.actief !== false ? ` <span class="label sterren" title="niveau ${G.niveau(m)} van 5${m.niveau ? '' : ' (nog niet ingevuld)'}">${'★'.repeat(G.niveau(m))}<span style="opacity:.3">${'★'.repeat(5 - G.niveau(m))}</span></span>` : ''}${m.actief !== false && G.leeftijd(m) != null && G.leeftijd(m) < 18 ? ` <span class="label let">${G.leeftijd(m)} jr</span>` : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
         <td>${(m.eigen_functies || m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}${afgeleid(m).length ? ` <small class="zacht" title="Volgt uit Instellingen → Functies">+ ${afgeleid(m).map(esc).join(', ')}</small>` : ''}</td>
         <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>

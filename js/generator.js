@@ -92,6 +92,14 @@
       return c;
     });
   };
+  // Eigen tijden per persoon die al vóór het indelen zijn vastgelegd (bij bevestigde mensen, de baas of inhuur):
+  // opgeslagen in de bezetting van het feest als { functie, ..., tijden: { medewerker_id: [start, eind] } }
+  G.eigenTijd = (e, functie, mid) => { for (const b of (e && e.bezetting) || []) if (b.functie === functie && b.tijden && b.tijden[mid]) return b.tijden[mid]; return null; };
+  G.pasEigenTijdenToe = (diensten, events) => {
+    for (const d of diensten) { if (!d.event_id || !d.medewerker_id) continue;
+      const t = G.eigenTijd(events[d.event_id], d.functie, d.medewerker_id); if (t) { d.start = t[0]; d.eind = t[1]; } }
+    return diensten;
+  };
   G.beheerMw = data => (data.medewerkers || []).find(G.isBeheer) || null;
   // Mag het personeel een plek van de baas overnemen? (per functie in te stellen bij het feest; standaard ja)
   G.baasOverneembaar = (d, e) => !(e && (e.bezetting || []).some(b => b.functie === d.functie && b.baas_overname === false));
@@ -668,6 +676,7 @@
     const eind = {}; for (const m of mws) eind[m.id] = (ctx.perMw[m.id] ? ctx.perMw[m.id].diensten : []).slice();
     diensten.forEach((d, i) => { d.medewerker_id = besteWie[i]; if (besteWie[i] && eind[besteWie[i]]) eind[besteWie[i]].push(d); });
 
+    G.pasEigenTijdenToe(diensten, ctx.events);
     const result = diensten.slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0) || G.min(a.start) - G.min(b.start) || a.locatie.localeCompare(b.locatie));
     for (const d of result) if (!d.medewerker_id && !(ctx.cafFase === 'vast' && d.locatie === 'cafetaria')) meldingen.push('Geen geschikte medewerker voor ' + d.functie + ' op ' + d.datum + ' (' + d.start + '-' + d.eind + ', ' + d.locatie + ')');
 
