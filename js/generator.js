@@ -141,7 +141,9 @@
     ['reeks', 'Niet te veel dagen achter elkaar'],
     ['weekend', 'Weekenddiensten (za/zo) eerlijk verdelen'],
     ['laat', 'Late diensten (na 22:00) eerlijk verdelen'],
-    ['wisselend', 'Zelfde begintijden binnen een week']
+    ['wisselend', 'Zelfde begintijden binnen een week'],
+    ['ervaring', 'Nieuwe of jonge mensen niet zonder ervaren collega (18+) in een dienst'],
+    ['niveau', 'Sterke en minder sterke mensen mengen (niveau 1–5)']
   ];
   G.plannerInst = function (data) {
     const p = (data && data.instellingen && data.instellingen.planner) || {};
@@ -150,9 +152,58 @@
     return {
       max_achter_elkaar: +p.max_achter_elkaar || 5,
       min_rust: (p.min_rust != null && p.min_rust !== '') ? +p.min_rust : 11,
+      jongeren: p.jongeren !== false,                  // wettelijke werktijden onder 18
+      min_leeftijd: p.min_leeftijd || {},             // per functie, bv. { Bar: 18 }
       w
     };
   };
+
+  // ---------- leeftijd en ervaring ----------
+  // ervaring: 'nieuw' | 'ervaren' | 'leiding' (leeg = ervaren, zodat bestaand personeel niets verandert)
+  G.leeftijd = (m, op) => {
+    if (!m || !m.geboortedatum) return null;
+    const g = String(m.geboortedatum).slice(0, 10), d = op || G.today();
+    let j = +d.slice(0, 4) - +g.slice(0, 4); if (d.slice(5) < g.slice(5)) j--;
+    return j;
+  };
+  G.ervaring = m => (m && m.ervaring) || 'ervaren';
+  // niveau: snelheid en kwaliteit, 1 (leert nog) t/m 5 (heel sterk); leeg = 3
+  G.niveau = m => { const n = +(m && m.niveau); return n >= 1 && n <= 5 ? n : 3; };
+  // Telt iemand als 'ervaren collega' voor de ploeg? Ervaren of leiding, en (als bekend) 18 of ouder.
+  G.isSenior = (m, op) => !!m && G.ervaring(m) !== 'nieuw' && !(G.leeftijd(m, op) != null && G.leeftijd(m, op) < 18);
+  G.isJunior = (m, op) => !!m && !G.isSenior(m, op);
+  // Diensten die tegelijk op dezelfde plek zijn (zelfde feest, of zelfde dag + locatie en overlappende tijd)
+  G.samen = (a, b) => a !== b && a.datum === b.datum && (a.event_id || b.event_id ? a.event_id === b.event_id : a.locatie === b.locatie) && G.overlap(a, b);
+  // Ploegen zonder ervaren collega: [{ datum, locatie, event_id, mensen:[naam], diensten:[...] }]
+  G.ploegZonderErvaren = function (diensten, data) {
+    const mw = {}; for (const m of data.medewerkers || []) mw[m.id] = m;
+    const bezet = diensten.filter(d => d.medewerker_id && mw[d.medewerker_id]);
+    const gezien = new Set(), uit = [];
+    for (const d of bezet) {
+      if (gezien.has(d)) continue;
+      // hele groep die (via elkaar) tegelijk werkt
+      const groep = [d], rij = [d]; gezien.add(d);
+      while (rij.length) { const x = rij.pop(); for (const y of bezet) if (!gezien.has(y) && G.samen(x, y)) { gezien.add(y); groep.push(y); rij.push(y); } }
+      if (!groep.some(x => G.isJunior(mw[x.medewerker_id], x.datum))) continue;
+      // per dienst kijken: werkt er op enig moment een junior zonder senior ernaast?
+      const fout = groep.filter(x => G.isJunior(mw[x.medewerker_id], x.datum) && !groep.some(y => y !== x && G.overlap(x, y) && G.isSenior(mw[y.medewerker_id], y.datum)));
+      if (fout.length) uit.push({ datum: d.datum, locatie: d.locatie, event_id: d.event_id || null, diensten: fout, mensen: [...new Set(fout.map(x => mw[x.medewerker_id].naam))] });
+    }
+    return uit.sort((a, b) => a.datum.localeCompare(b.datum));
+  };
+  // Mag iemand van deze leeftijd deze dienst doen? (wettelijke werktijden jongeren + minimumleeftijd per functie)
+  function leeftijdOk(P, m, slot) {
+    const lft = G.leeftijd(m, slot.datum);
+    if (lft == null) return null;
+    const min = +(P.min_leeftijd || {})[slot.functie] || 0;
+    if (min && lft < min) return 'te jong voor ' + slot.functie + ' (' + min + '+)';
+    if (P.jongeren && lft < 18) {
+      let e = G.min(slot.eind); const st = G.min(slot.start); if (e <= st) e += 1440;
+      const grens = lft < 16 ? 19 * 60 : 23 * 60;
+      if (e > grens) return (lft < 16 ? 'onder 16: niet na 19:00' : 'onder 18: niet na 23:00');
+    }
+    return null;
+  }
 
   // ---------- beschikbaarheid ----------
   function onbeschikbaarDeel(deel, slot) {
@@ -230,6 +281,8 @@
     const vl = ctx.verlof.find(v => v.medewerker_id === m.id && v.van <= slot.datum && v.tot >= slot.datum && v.status === 'goedgekeurd');
     if (vl) return { ok: false, reden: 'vrij (goedgekeurd)' };
     if (m.langdurig_ziek) return { ok: false, reden: 'langdurig ziek' };
+    const lft = leeftijdOk(ctx.P || G.plannerInst(ctx.data), m, slot);
+    if (lft) return { ok: false, reden: lft };
     // Een ziekmelding zonder einddatum geldt tot het eind van de maand (van de melding, of van nu als die al loopt).
     // De maand erna wordt iemand gewoon weer ingepland; wie langer ziek is, zet de baas op 'langdurig ziek'.
     if (ctx.ziek.some(z => z.medewerker_id === m.id && z.van <= slot.datum && slot.datum <= (z.tot || G.lastDay(G.monthOf(z.van > G.today() ? z.van : G.today())))))
@@ -378,6 +431,28 @@
   // Geeft {ok, score, redenen[]} terug (hoger = beter)
   // opties.negeerUitvraag: bij zelf oppakken van een open dienst hoeft een oproepkracht niet vooraf 'kan' te hebben gezegd
   // opties.alleenOk: alleen kijken óf iemand kan (sneller)
+  // Voor het handmatig kiezen: helpt deze persoon de ploeg (ervaren collega), of staat er nog niemand ervarens?
+  function P_ploeg(ctx, m, slot, redenen) {
+    if (!ctx.P) return 0;
+    let extra = 0;
+    if (ctx.P.w.niveau && (ctx.data.medewerkers || []).some(x => G.niveau(x) !== 3)) {
+      const mw0 = {}; for (const x of ctx.data.medewerkers || []) mw0[x.id] = x;
+      const pl = (ctx.alle || []).filter(d => d.medewerker_id && d.medewerker_id !== m.id && d.id !== slot.id && G.samen(slot, d)).map(d => G.niveau(mw0[d.medewerker_id]));
+      const nv = G.niveau(m);
+      if (pl.length) { const gem = pl.reduce((a, b) => a + b, 0) / pl.length;
+        if (gem < 3 && nv >= 4) { redenen.unshift('sterk (' + nv + '★) – ploeg is nu zwak'); extra += ctx.P.w.niveau * 60; }
+        else if (gem < 3 && nv <= 2) { redenen.push(nv + '★ · ploeg is al zwak'); extra -= ctx.P.w.niveau * 60; } }
+    }
+    if (!ctx.P.w.ervaring) return extra;
+    const mw = {}; for (const x of ctx.data.medewerkers || []) mw[x.id] = x;
+    const ploeg = (ctx.alle || []).filter(d => d.medewerker_id && d.medewerker_id !== m.id && d.id !== slot.id && G.samen(slot, d));
+    const senior = ploeg.some(d => G.isSenior(mw[d.medewerker_id], d.datum));
+    const lft = G.leeftijd(m, slot.datum);
+    const W = ctx.P.w.ervaring * 150;
+    if (G.isSenior(m, slot.datum)) { if (ploeg.length && !senior) { redenen.unshift('ervaren – nodig in deze ploeg'); return extra + W; } return extra; }
+    redenen.push((G.ervaring(m) === 'nieuw' ? 'nieuw' : lft + ' jaar') + (senior ? '' : ' · nog geen ervaren collega erbij'));
+    return extra + (senior ? 0 : -W);
+  }
   G.beoordeel = function (ctx, m, slot, opties) {
     opties = opties || {};
     const v = vastOk(ctx, m, slot, opties);
@@ -420,9 +495,10 @@
       let a = t.dag, b = t.dag; while (dagen.has(a - 1)) a--; while (dagen.has(b + 1)) b++;
       redenen.push((b - a + 1) + ' dagen achter elkaar');
     }
+    const ploegScore = P_ploeg(ctx, m, slot, redenen);
     if (delta('weekend') > 12) redenen.push('al veel weekenddiensten');
     if (delta('laat') > 12) redenen.push('al veel late diensten');
-    return { ok: true, score: Math.round(-(na.totaal - voor.totaal)), redenen };
+    return { ok: true, score: Math.round(-(na.totaal - voor.totaal) + ploegScore), redenen };
   };
 
   // Kandidatenlijst voor een dienst (ook voor de keuzelijst in beheer)
@@ -487,6 +563,46 @@
       wie[i] = m.id; d.medewerker_id = m.id; lijst[m.id].push(d); kost[m.id] = kosten(ctx, m, lijst[m.id], maanden).totaal; vast[i] = true;
     }
 
+    // Ploeg: nieuwe/jonge mensen liever niet zonder ervaren collega (18+) die tegelijk werkt
+    const W_ERV = (ctx.P.w.ervaring || 0) * 150, W_NIV = (ctx.P.w.niveau || 0) * 40;
+    const ervAan = W_ERV > 0 && mws.some(m => G.isJunior(m)), nivAan = W_NIV > 0 && mws.some(m => G.niveau(m) !== 3);
+    const ploegAan = ervAan || nivAan;
+    const buren = diensten.map(() => []), burenVast = diensten.map(() => false);
+    if (ploegAan) {
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (G.samen(diensten[i], diensten[j])) { buren[i].push(j); buren[j].push(i); }
+      const vaste = (ctx.bron || []).filter(d => d.medewerker_id && !diensten.includes(d));
+      diensten.forEach((d, i) => { burenVast[i] = vaste.some(x => G.samen(d, x) && G.isSenior(perId[x.medewerker_id] || (data.medewerkers || []).find(m => m.id === x.medewerker_id), x.datum)); });
+    }
+    // niveau van vaste collega's (al ingepland buiten deze planning) die tegelijk werken
+    const nivVast = diensten.map(() => []);
+    if (nivAan) { const vaste = (ctx.bron || []).filter(d => d.medewerker_id && !diensten.includes(d));
+      diensten.forEach((d, i) => { for (const x of vaste) if (G.samen(d, x)) { const m = perId[x.medewerker_id] || (data.medewerkers || []).find(y => y.id === x.medewerker_id); if (m) nivVast[i].push(G.niveau(m)); } }); }
+    const ploegKost = i => {
+      const id = wie[i]; if (!id) return 0;
+      const d = diensten[i]; let k = 0;
+      if (ervAan && !G.isSenior(perId[id], d.datum) && !burenVast[i] && !buren[i].some(j => wie[j] && G.isSenior(perId[wie[j]], diensten[j].datum))) k += W_ERV;
+      if (nivAan) {
+        // gemiddeld niveau van de ploeg rond deze dienst; onder de 3 kost het (steeds meer)
+        let som = G.niveau(perId[id]), n = 1;
+        for (const j of buren[i]) if (wie[j]) { som += G.niveau(perId[wie[j]]); n++; }
+        for (const v of nivVast[i]) { som += v; n++; }
+        const tekort = Math.max(0, 3 - som / n); k += W_NIV * tekort * tekort * 4;
+      }
+      return k;
+    };
+    // verschil in ploegkosten als de diensten in 'wijz' ({index: medewerker_id|null}) veranderen
+    const ploegDelta = wijz => {
+      if (!ploegAan) return 0;
+      const raak = new Set();
+      for (const k in wijz) { raak.add(+k); for (const j of buren[+k]) raak.add(j); }
+      let voor = 0, na = 0; const oud = {};
+      for (const i of raak) voor += ploegKost(i);
+      for (const k in wijz) { oud[k] = wie[+k]; wie[+k] = wijz[k]; }
+      for (const i of raak) na += ploegKost(i);
+      for (const k in oud) wie[+k] = oud[k];
+      return na - voor;
+    };
+
     // 1 + 2: opbouwen
     const volgorde = diensten.map((d, i) => i).filter(i => !vast[i]).sort((a, b) => kand[a].length - kand[b].length || tijd(diensten[a]).a - tijd(diensten[b]).a);
     for (const i of volgorde) {
@@ -495,7 +611,8 @@
       for (const m of kand[i]) {
         if (pastErbij(m, d, lijst[m.id])) continue;
         const nk = kosten(ctx, m, lijst[m.id].concat([d]), maanden).totaal;
-        if (nk - kost[m.id] < besteDelta) { besteDelta = nk - kost[m.id]; beste = m; besteK = nk; }
+        const dl = nk - kost[m.id] + ploegDelta({ [i]: m.id });
+        if (dl < besteDelta) { besteDelta = dl; beste = m; besteK = nk; }
       }
       if (beste && besteDelta < OPEN) { wie[i] = beste.id; d.medewerker_id = beste.id; lijst[beste.id].push(d); kost[beste.id] = besteK; }
     }
@@ -506,6 +623,7 @@
     const maxTijd = opties.tijd || 2500;
     const t0 = nu();
     let totaal = 0; for (const id in kost) totaal += kost[id]; totaal += OPEN * wie.filter(x => !x).length;
+    if (ploegAan) for (let i = 0; i < n; i++) totaal += ploegKost(i);
     let beste = totaal, besteWie = wie.slice(), verbeterd = 0, it = 0;
     const T0 = 40, T1 = 0.3;
     for (; it < maxIt; it++) {
@@ -517,7 +635,7 @@
       if (a && ctx.cafFase && toeval() < 0.08) {
         // (alleen bij de cafetaria-rondes) dienst weer open zetten als dat goedkoper is
         const la = zonder(lijst[a], d), ka = kosten(ctx, perId[a], la, maanden).totaal;
-        delta = (ka - kost[a]) + OPEN;
+        delta = (ka - kost[a]) + OPEN + ploegDelta({ [i]: null });
         toepassen = () => { lijst[a] = la; kost[a] = ka; wie[i] = null; };
       } else if (toeval() < 0.5 || !a) {
         // dienst aan iemand anders geven
@@ -527,7 +645,7 @@
         const lm = lijst[m.id].concat([d]), km = kosten(ctx, m, lm, maanden).totaal;
         let la = null, ka = 0;
         if (a) { la = zonder(lijst[a], d); ka = kosten(ctx, perId[a], la, maanden).totaal; }
-        delta = (km - kost[m.id]) + (a ? ka - kost[a] : -OPEN);
+        delta = (km - kost[m.id]) + (a ? ka - kost[a] : -OPEN) + ploegDelta({ [i]: m.id });
         toepassen = () => { lijst[m.id] = lm; kost[m.id] = km; if (a) { lijst[a] = la; kost[a] = ka; } wie[i] = m.id; };
       } else {
         // twee mensen laten ruilen
@@ -537,7 +655,7 @@
         if (pastErbij(perId[a], e, la) || pastErbij(perId[b], d, lb)) continue;
         la.push(e); lb.push(d);
         const ka = kosten(ctx, perId[a], la, maanden).totaal, kb = kosten(ctx, perId[b], lb, maanden).totaal;
-        delta = (ka - kost[a]) + (kb - kost[b]);
+        delta = (ka - kost[a]) + (kb - kost[b]) + ploegDelta({ [i]: b, [j]: a });
         toepassen = () => { lijst[a] = la; kost[a] = ka; lijst[b] = lb; kost[b] = kb; wie[i] = b; wie[j] = a; };
       }
       if (delta < 0 || toeval() < Math.exp(-delta / T)) {
@@ -555,6 +673,11 @@
 
     // wat er niet helemaal gelukt is
     const P = ctx.P;
+    if (ervAan) {
+      const alle = diensten.concat((ctx.bron || []).filter(d => !diensten.includes(d)));
+      for (const pl of G.ploegZonderErvaren(alle, data).filter(pl => pl.diensten.some(d => diensten.includes(d))))
+        meldingen.push('Geen ervaren collega (18+) bij ' + pl.mensen.join(', ') + ' op ' + kortDatum(pl.datum) + ' (' + (pl.event_id && ctx.events[pl.event_id] ? ctx.events[pl.event_id].naam : pl.locatie) + ', ' + pl.diensten.map(d => d.start + '-' + d.eind).join(', ') + ')');
+    }
     for (const m of mws) {
       const eigen = eind[m.id].filter(d => maanden.includes(G.monthOf(d.datum)));
       if (!eigen.some(d => diensten.includes(d))) continue;

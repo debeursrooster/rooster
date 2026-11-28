@@ -530,3 +530,8 @@ details.paneel[open] > summary::before { content: '▾'; }
 
 .maand-kop { margin: 1em 0 .1em; padding-bottom: .3em; border-bottom: 2px solid var(--lijn); font-size: .95rem; text-transform: capitalize; color: var(--zacht); }
 .maand-kop:first-of-type { margin-top: .2em; }
+
+.min-lft { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .4em .8em; }
+.min-lft label { display: flex; align-items: center; justify-content: space-between; gap: .5em; font-size: .9rem; }
+.min-lft input { width: 5em; }
+.ploeg-let { background: var(--let-licht); border-left: 4px solid var(--let); border-radius: 8px; padding: .5em .8em; margin: .5em 0; font-size: .9rem; }

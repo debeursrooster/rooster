@@ -328,6 +328,9 @@
         <div class="acties">${(r.meldingen || []).length ? `<button class="knop klein" id="toonMeldingen">⚠️ ${(r.meldingen || []).length}</button>` : ''}${zalenKnop}<button class="knop klein" id="deelWa">💬 Deel via WhatsApp</button>${terugKnop}</div></div>`;
     }
 
+    // Nieuwe of jonge mensen zonder ervaren collega (18+) in dezelfde dienst
+    const ploegFout = G.plannerInst(d).w.ervaring ? G.ploegZonderErvaren(diensten, d) : [];
+    const ploegHtml = ploegFout.length ? `<div class="ploeg-let">🌱 <b>${ploegFout.length}× nieuw of jong personeel zonder ervaren collega (18+)</b> in dezelfde dienst. <a href="#" id="toonPloeg">Bekijken</a></div>` : '';
     hoofd.innerHTML = `
       <div class="kop"><h1>Rooster</h1>
         <div class="acties">
@@ -337,6 +340,7 @@
           <button class="knop" onclick="window.print()">🖨</button>
         </div></div>
       ${status}
+      ${ploegHtml}
       <div id="roosterInhoud"></div>`;
     hoofd.querySelectorAll('#locTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.loc); b.onclick = () => { staat.loc = b.dataset.v; pRooster(); }; });
     hoofd.querySelectorAll('#weergaveTabs button').forEach(b => { b.classList.toggle('actief', b.dataset.v === staat.weergave); b.onclick = () => { staat.weergave = b.dataset.v; pRooster(); }; });
@@ -365,6 +369,8 @@
     if (k('terugtrekken')) k('terugtrekken').onclick = e => A.bezig(e.currentTarget, () => terugtrekken(maand, e.currentTarget.dataset.wat));
     if (k('deelWa')) k('deelWa').onclick = () => deelWhatsApp(maand);
     if (k('zalenVersturen')) k('zalenVersturen').onclick = e => A.bezig(e.currentTarget, () => publiceer(maand, 'zalen'));
+    if (k('toonPloeg')) k('toonPloeg').onclick = e => { e.preventDefault(); A.modal('Geen ervaren collega erbij', `<p class="zacht">Op deze momenten werkt er nieuw of jong personeel zonder ervaren collega van 18+. Tik in de kalender op een dienst om iemand anders te kiezen; wie "ervaren – nodig in deze ploeg" heeft, staat bovenaan.</p>
+      <ul class="waarschuwingen">${ploegFout.map(pl => `<li><b>${esc(A.datumKort(pl.datum))}</b> · ${pl.event_id && A.event(pl.event_id) ? '🎉 ' + esc(A.event(pl.event_id).naam) : esc(A.LOC[pl.locatie])} · ${pl.diensten.map(x => esc(x.start + '–' + x.eind + ' ' + x.functie)).join(', ')} · <b>${pl.mensen.map(esc).join(', ')}</b></li>`).join('')}</ul>`); };
     if (k('toonMeldingen')) k('toonMeldingen').onclick = () => A.modal('Opmerkingen van de planner', `<p class="zacht">Dit kwam de planner tegen bij het maken van het rooster:</p><ul class="waarschuwingen">${(r.meldingen || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>`);
 
     const inh = $('#roosterInhoud');
@@ -526,6 +532,8 @@
     return `<div class="indeling">
       <div class="indeling-kop"><b>${e.status === 'concept' ? '📝 Ingepland, nog niet verstuurd' : '✅ Ingepland en verstuurd'}</b>
         <span class="label ${open ? 'fout' : baas ? 'let' : 'ok'}">${ds.length - open - baas} van ${ds.length} personeel${baas ? ` · ${baas}× ${esc(beheerNaam())}` : ''}${open ? ` · ${open} open` : ''}</span></div>
+      ${(() => { const pf = G.plannerInst(A.data).w.ervaring ? G.ploegZonderErvaren(ds, A.data) : [];
+        return pf.length ? `<div class="ploeg-let">🌱 <b>Geen ervaren collega (18+) erbij</b> voor ${pf.flatMap(p => p.mensen).filter((n, i, l) => l.indexOf(n) === i).map(esc).join(', ')}. Zet er iemand bij die ervaren is, of wissel iemand.</div>` : ''; })()}
       ${fns.map(f => { const rij = ds.filter(x => x.functie === f);
         return `<div class="indeling-rij"><div class="indeling-fn">${esc(f)} <small class="zacht">${rij.filter(x => x.medewerker_id).length}/${rij.length}</small></div>
           <div class="indeling-namen${wijzig ? ' met-tijd' : ''}">${rij.map(x => { const m = A.mw(x.medewerker_id);
@@ -1129,7 +1137,8 @@
     const st = personeelStats(m), uv = st.uv, vz = st.vz;
     const tegel = (getal, wat, sub, kl) => `<div class="tegel ${kl || ''}"><div class="getal" style="font-size:1.6rem">${getal}</div><div class="wat">${wat}${sub ? `<br><small>${sub}</small>` : ''}</div></div>`;
     const komend = A.data.diensten.filter(x => x.medewerker_id === mid && x.datum >= G.today()).sort((a, b) => a.datum.localeCompare(b.datum) || G.min(a.start) - G.min(b.start)).slice(0, 6);
-    hoofd.innerHTML = `<div class="kop"><div style="display:flex;align-items:center;gap:.7em"><a class="knop klein" href="#personeel">← Personeel</a>${avatar(m)}<div><h1 style="margin:0">${esc(m.naam)}${m.langdurig_ziek ? ' <span class="label fout" style="font-size:.9rem;vertical-align:middle">langdurig ziek</span>' : ''}</h1><span class="zacht">${+m.contracturen ? A.uren(+m.contracturen) + ' uur per week' : 'oproepkracht'} · ${functieTekst(m)}${m.telefoon ? ' · ' + esc(m.telefoon) : ''}</span></div></div>
+    hoofd.innerHTML = `<div class="kop"><div style="display:flex;align-items:center;gap:.7em"><a class="knop klein" href="#personeel">← Personeel</a>${avatar(m)}<div><h1 style="margin:0">${esc(m.naam)}${m.langdurig_ziek ? ' <span class="label fout" style="font-size:.9rem;vertical-align:middle">langdurig ziek</span>' : ''}</h1>
+          <div style="display:flex;gap:.35em;flex-wrap:wrap;margin:.2em 0">${{ nieuw: '<span class="label let">🌱 nieuw</span>', ervaren: '<span class="label">⭐ ervaren</span>', leiding: '<span class="label ok">👑 kan leiden</span>' }[G.ervaring(m)]}<span class="label" title="niveau">${'★'.repeat(G.niveau(m))}<span style="opacity:.3">${'★'.repeat(5 - G.niveau(m))}</span></span>${G.leeftijd(m) != null ? `<span class="label ${G.leeftijd(m) < 18 ? 'let' : ''}">${G.leeftijd(m)} jaar</span>` : ''}</div><span class="zacht">${+m.contracturen ? A.uren(+m.contracturen) + ' uur per week' : 'oproepkracht'} · ${functieTekst(m)}${m.telefoon ? ' · ' + esc(m.telefoon) : ''}</span></div></div>
         <div class="acties">${m.telefoon ? `<a class="knop" href="tel:${esc(m.telefoon.replace(/[^\d+]/g, ''))}">📞 Bellen</a>` : ''}<button class="knop" id="mkUitnodig" type="button">📲 Uitnodigen</button><button class="knop primair" id="mkWijzig" type="button">✏️ Gegevens wijzigen</button></div></div>
       <div class="statusbalk ${st.let.length ? 'concept' : 'gepubliceerd'}" style="margin-bottom:1em">${st.let.length ? '⚠️' : '👍'} <div>
         ${st.goed.length ? `<div><b>Goed:</b> ${st.goed.map(esc).join(' · ')}</div>` : ''}
@@ -2054,7 +2063,7 @@
     hoofd.innerHTML = `<div class="kop"><h1>Personeel</h1><div class="acties"><button class="knop" id="mwPoster" type="button">🖨 QR-poster</button><button class="knop" id="mwKaartjes" type="button">🪪 Alle uitnodigingen printen</button><button class="knop" id="mwBericht" type="button">🔔 Bericht aan personeel</button><button class="knop primair" id="nieuwMw">+ Medewerker</button></div></div>
       <div class="paneel"><div class="tabel-wrap"><table class="lijst"><thead><tr><th>Naam</th><th>Functies</th><th>Werkt in</th><th>Uren p/w</th><th>Vaste dagen</th><th>Nooit op</th><th>Deze maand</th><th>Beeld</th><th></th></tr></thead><tbody>
       ${alle.map(m => `<tr class="klik" data-mw="${m.id}" style="${m.actief === false ? 'opacity:.5' : ''}">
-        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}${m.langdurig_ziek ? ' <span class="label fout">langdurig ziek</span>' : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:.6em">${avatar(m)}<div><b>${esc(m.naam)}</b>${m.actief === false ? (/^inhuur/i.test(m.notitie || '') ? ' <span class="label let">inhuur</span>' : /^beheer/i.test(m.notitie || '') ? ' <span class="label let">beheer</span>' : ' <span class="label">uit dienst</span>') : ''}${m.langdurig_ziek ? ' <span class="label fout">langdurig ziek</span>' : ''}${m.actief !== false && G.ervaring(m) === 'nieuw' ? ' <span class="label let">🌱 nieuw</span>' : ''}${m.actief !== false && G.ervaring(m) === 'leiding' ? ' <span class="label ok">👑</span>' : ''}${m.actief !== false && m.niveau ? ` <span class="label" title="niveau ${G.niveau(m)} van 5">${'★'.repeat(G.niveau(m))}</span>` : ''}${m.actief !== false && G.leeftijd(m) != null && G.leeftijd(m) < 18 ? ` <span class="label let">${G.leeftijd(m)} jr</span>` : ''}<br><small class="zacht">${esc(m.telefoon || '')}</small></div></div></td>
         <td>${(m.eigen_functies || m.functies || []).map(f => `<span class="label">${esc(f)}</span>`).join(' ')}${afgeleid(m).length ? ` <small class="zacht" title="Volgt uit Instellingen → Functies">+ ${afgeleid(m).map(esc).join(', ')}</small>` : ''}</td>
         <td>${(m.locaties || []).map(locLabel).join(' ')}</td>
         <td>${+m.contracturen ? A.uren(+m.contracturen) : '<span class="label">oproep</span>'}</td>
@@ -2237,6 +2246,12 @@
       <div class="rij"><div class="veld"><label>Contracturen per week <small>(0 = oproepkracht)</small></label><input type="number" min="0" step="0.5" id="mUren" value="${esc(m.contracturen)}"></div>
         <div class="veld"><label>Max. dagen per week</label><input type="number" min="1" max="7" id="mMax" value="${esc(m.max_dagen_week || 5)}"></div></div>
       <div class="veld"><label>Vaste werkdagen <small>(krijgt voorrang op deze dagen)</small></label>${chips('vast', dagOpties, m.vaste_dagen)}</div>
+      <div class="rij"><div class="veld"><label>Ervaring</label><select id="mErv">
+          ${[['nieuw', '🌱 Nieuw'], ['ervaren', '⭐ Ervaren'], ['leiding', '👑 Kan een dienst leiden']].map(([v, l]) => `<option value="${v}" ${G.ervaring(m) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="veld"><label>Geboortedatum <small>(voor leeftijd; collega's zien dit niet)</small></label><input type="date" id="mGeb" value="${esc((m.geboortedatum || '').slice(0, 10))}" max="${G.today()}"></div></div>
+      <div class="veld"><label>Niveau <small>(snelheid en kwaliteit – collega's zien dit niet)</small></label><select id="mNiv">
+          ${[[1, '★ 1 – leert nog, langzaam'], [2, '★★ 2 – redelijk'], [3, '★★★ 3 – gemiddeld'], [4, '★★★★ 4 – goed en vlot'], [5, '★★★★★ 5 – heel sterk, trekt de ploeg']].map(([v, l]) => `<option value="${v}" ${G.niveau(m) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <small class="zacht" style="display:block;margin:-.4em 0 .8em">Nieuwe mensen en iedereen onder de 18 komen niet samen in een dienst zonder ervaren collega van 18+. Onder 18 ook niet na 23:00 (onder 16: niet na 19:00). Met het niveau zet de planner sterke en minder sterke mensen samen. Zie Instellingen → Ploeg samenstellen.</small>
       <div class="veld"><label>Liever niet op <small>(alleen als het echt nodig is)</small></label>${chips('liever', dagOpties, m.liever_niet_dagen)}</div>
       <div class="veld"><label>Kan nooit op <small>(wordt dan nooit ingepland)</small></label>${chips('vrij', dagOpties, m.vrije_dagen, true)}</div>
       <div class="rij"><div class="veld"><label>Kleur in rooster</label><input type="color" id="mKleur" value="${esc(m.kleur)}" style="height:40px;padding:2px"></div>
@@ -2258,7 +2273,7 @@
       },
       waarde: bg => {
         const val = n => [...bg.querySelectorAll(`input[name=${n}]:checked`)].map(i => i.value);
-        return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), liever_niet_dagen: val('liever').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, langdurig_ziek: bg.querySelector('#mLangZiek').checked, notitie: bg.querySelector('#mNot').value };
+        return { naam: bg.querySelector('#mNaam').value.trim(), pin: bg.querySelector('#mPin').value.trim(), telefoon: bg.querySelector('#mTel').value, email: bg.querySelector('#mMail').value, functies: val('fn'), locaties: val('loc'), contracturen: +bg.querySelector('#mUren').value || 0, max_dagen_week: +bg.querySelector('#mMax').value || 5, vaste_dagen: val('vast').map(Number), liever_niet_dagen: val('liever').map(Number), vrije_dagen: val('vrij').map(Number), kleur: bg.querySelector('#mKleur').value, actief: bg.querySelector('#mActief').checked, langdurig_ziek: bg.querySelector('#mLangZiek').checked, ervaring: bg.querySelector('#mErv').value, geboortedatum: bg.querySelector('#mGeb').value || null, niveau: +bg.querySelector('#mNiv').value, notitie: bg.querySelector('#mNot').value };
       }
     });
     const res = await A.modal(nieuw ? 'Nieuwe medewerker' : m.naam, html, knoppen, bg => {
@@ -2399,13 +2414,29 @@
         Wat nooit mag (verkeerde functie, vrij, ziek, "kan niet", al aan het werk, max. dagen per week) gebeurt nooit, wat je hier ook kiest.</p>
       <div class="rij"><div class="veld"><label>Liefst niet meer dan … dagen achter elkaar</label><input type="number" min="2" max="14" id="iReeks" value="${esc(P.max_achter_elkaar)}"></div>
         <div class="veld"><label>Minimaal … uur rust tussen twee diensten</label><input type="number" min="0" max="24" step="0.5" id="iRust" value="${esc(P.min_rust)}"></div></div>
-      <div class="planner-punten">${G.PLANNER_PUNTEN.map(([k, l]) => `<div class="planner-punt"><span>${esc(l)}</span>${sel(k, P.w[k])}</div>`).join('')}</div>
+      <div class="planner-punten">${G.PLANNER_PUNTEN.filter(([k]) => k !== 'ervaring' && k !== 'niveau').map(([k, l]) => `<div class="planner-punt"><span>${esc(l)}</span>${sel(k, P.w[k])}</div>`).join('')}</div>
       <button class="knop klein" type="button" id="iPlannerStd" style="margin-top:.8em">Alles op normaal</button></div>`;
   }
   function leesPlanner() {
     const gewichten = {};
     hoofd.querySelectorAll('[data-gewicht]').forEach(x => gewichten[x.dataset.gewicht] = +x.value);
-    return { max_achter_elkaar: +$('#iReeks').value || 5, min_rust: $('#iRust').value === '' ? 11 : +$('#iRust').value, gewichten };
+    const ervSel = $('#iErvaring'); if (ervSel) gewichten.ervaring = +ervSel.value;
+    const nivSel = $('#iNiveau'); if (nivSel) gewichten.niveau = +nivSel.value;
+    const min_leeftijd = {}; hoofd.querySelectorAll('[data-minlft]').forEach(x => { if (+x.value) min_leeftijd[x.dataset.minlft] = +x.value; });
+    return { max_achter_elkaar: +$('#iReeks').value || 5, min_rust: $('#iRust').value === '' ? 11 : +$('#iRust').value, gewichten,
+      jongeren: $('#iJongeren') ? $('#iJongeren').checked : true, min_leeftijd };
+  }
+  // Leeftijd en ervaring: zichtbaar (niet onder Geavanceerd), want dit wil je bewust instellen
+  function leeftijdPaneel(s) {
+    const P = G.plannerInst({ instellingen: s });
+    return `<div class="paneel"><h3>👥 Ploeg samenstellen: leeftijd, ervaring en niveau</h3>
+      <p class="zacht" style="font-size:.9rem">Vul bij <b>Personeel</b> per medewerker de ervaring, geboortedatum en het niveau (★1–5) in. Nieuwe mensen en iedereen onder de 18 zet de planner zo veel mogelijk samen met een ervaren collega van 18 of ouder. Met het niveau zorgt hij dat er in elke dienst sterke en minder sterke mensen samen staan, in plaats van alleen de langzame bij elkaar. Lukt het niet met ervaring, dan zie je het bij het rooster en de feesten.</p>
+      <div class="rij"><div class="veld"><label>Sterke en minder sterke mensen mengen <small>(niveau ★1–5)</small></label><select id="iNiveau">${GEWICHT_OPTIES.map(([v, l]) => `<option value="${v}" ${+P.w.niveau === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="veld"></div></div>
+      <div class="rij"><div class="veld"><label>Nieuw of jong niet zonder ervaren collega</label><select id="iErvaring">${GEWICHT_OPTIES.map(([v, l]) => `<option value="${v}" ${+P.w.ervaring === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="veld"><label>&nbsp;</label><label class="check"><input type="checkbox" id="iJongeren" ${P.jongeren ? 'checked' : ''}> Werktijden jongeren: onder 18 niet na 23:00, onder 16 niet na 19:00</label></div></div>
+      <h4 style="margin:.8em 0 .2em">Minimumleeftijd per functie</h4>
+      <p class="zacht" style="font-size:.85rem;margin:0 0 .5em">Bijvoorbeeld Bar 18. Leeg = geen grens. Wie jonger is (en een geboortedatum heeft), wordt daar nooit ingepland.</p>
+      <div class="min-lft">${(s.functies || []).map(f => `<label><span>${esc(f)}</span><input type="number" min="0" max="99" data-minlft="${esc(f)}" value="${esc(P.min_leeftijd[f] || '')}" placeholder="–"></label>`).join('')}</div></div>`;
   }
 
   function pInstellingen() {
@@ -2431,6 +2462,7 @@
         <label class="check" style="margin-bottom:.6em"><input type="checkbox" id="iRuil" ${s.ruil_goedkeuring ? 'checked' : ''}> Ruilen van diensten eerst laten goedkeuren door beheer</label>
         <label class="check"><input type="checkbox" id="iFeestRuil" ${s.feest_ruil_goedkeuring ? 'checked' : ''}> Overnemen van een bevestigde feestplek (nog vóór het inplannen) eerst laten goedkeuren door beheer</label>
         <p class="zacht" style="margin-top:.8em;font-size:.88rem">Volgende automatische rooster: <b>${esc(A.maandNaam(G.nextMonth(G.monthOf(G.today()))))}</b> op <b>${esc(A.datumLang(G.generatieDatum(G.nextMonth(G.monthOf(G.today())), s.dagen_voor_einde)))}</b>. ${Store.modus === 'demo' ? 'In demo-modus gebeurt dit als je beheer opent.' : 'Dit gebeurt elke ochtend via GitHub Actions, en ook als je beheer opent.'}</p></div>
+      ${leeftijdPaneel(s)}
       <details class="paneel geavanceerd"><summary><b>⚙️ Geavanceerd</b> <small class="zacht">rekenregels van de planner – meestal hoef je hier niets te veranderen</small></summary>
         <div class="paneel" style="box-shadow:none;border:1px solid var(--lijn)"><h3>Cafetaria in stappen</h3>
         <p class="zacht" style="margin-top:-.3em">Aantal dagen vóór het rooster klaar is.</p>
