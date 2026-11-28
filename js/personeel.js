@@ -268,6 +268,9 @@
     const uitvraagItem = e => { const r = mijnReactie(e); const fns = [...new Set((e.bezetting || []).map(b => b.functie))].filter(f => (ik.functies || []).includes(f));
       return `<div class="item" style="flex-wrap:wrap"><div class="datumblok zalen"><b>${G.parse(e.datum).getUTCDate()}</b><small>${A.DAG_KORT[G.weekday(e.datum)]}</small></div>
         <div style="flex:1;min-width:150px"><div class="wie">${esc(e.naam)}</div><div class="meta">${esc(A.datumLang(e.datum))} · ${esc(e.start)}–${esc(e.eind)}${fns.length ? ' · ' + fns.map(esc).join('/') : ''}</div>
+        ${(() => { // plekken met een andere tijd dan het feest (bv. Bar 19:30) apart laten zien
+          const afw = (e.bezetting || []).filter(b => fns.includes(b.functie) && ((b.start && b.start !== e.start) || (b.eind && b.eind !== e.eind)));
+          return afw.length ? `<div class="meta">⏱ Ook later/eerder: ${afw.map(b => `${esc(b.functie)} ${esc(b.start || e.start)}–${esc(b.eind || e.eind)}`).join(' · ')}</div>` : ''; })()}
         <div class="meta">Reageren t/m ${esc(A.datumKort(e.uitvraag_tot))}</div></div>
         ${r && r.kan && r.bevestigd_functie
           ? `<div style="flex-basis:100%;display:flex;align-items:center;gap:.6em;justify-content:flex-end;flex-wrap:wrap"><label class="schuif" title="Bevestigd"><input type="checkbox" checked disabled><span class="baan"><i></i></span><span class="schuif-tekst">🔒 Bevestigd</span></label>

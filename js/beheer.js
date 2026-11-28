@@ -1646,12 +1646,24 @@
       <div class="veld"><label style="display:flex;justify-content:space-between;align-items:center">Benodigd personeel <button class="knop klein plat" id="eStandaard" type="button">✨ Voorstel op basis van gasten</button></label>
         <div class="rij" style="grid-template-columns:1.4fr .6fr .8fr .8fr auto;gap:.4em;font-size:.75rem;color:var(--zacht);font-weight:700"><span>Functie</span><span>Aantal</span><span>Begin*</span><span>Eind*</span><span></span></div>
         <div id="bezRijen">${(e.bezetting || []).map(rijHtml).join('')}</div>
-        <button class="knop klein" id="eRij" type="button">+ Functie</button> <small class="zacht">* alleen invullen als het afwijkt van de feesttijden</small></div>
+        <button class="knop klein" id="eRij" type="button">+ Functie</button> <small class="zacht">* alleen invullen als het afwijkt van de feesttijden</small>
+        <label class="check" style="margin-top:.5em"><input type="checkbox" id="ePerPlek"> ⏱ Andere tijden per plek <small class="zacht">(bv. 1× Bar om 19:30, de rest op de feesttijd)</small></label></div>
       ${uitvraagHtml}
       ${baasHtml}
       ${reactieHtml}
       <div class="veld"><label>Notitie</label><textarea id="eNot" placeholder="Bijzonderheden, menu, contactpersoon…">${esc(e.notitie || '')}</textarea></div>`;
-    const leesBez0 = bg => [...bg.querySelectorAll('.bez-rij')].map(r => ({ functie: r.querySelector('.bFn').value, aantal: +r.querySelector('.bAantal').value || 0, start: r.querySelector('.bStart').value || undefined, eind: r.querySelector('.bEind').value || undefined })).filter(b => b.aantal > 0);
+    const leesBez0 = bg => {
+      const fs = bg.querySelector('#eStart').value, fe = bg.querySelector('#eEind').value, uit = [];
+      for (const r of bg.querySelectorAll('.bez-rij')) {
+        const b = { functie: r.querySelector('.bFn').value, aantal: +r.querySelector('.bAantal').value || 0, start: r.querySelector('.bStart').value || undefined, eind: r.querySelector('.bEind').value || undefined };
+        if (b.start === fs) b.start = undefined; if (b.eind === fe) b.eind = undefined;
+        if (b.aantal <= 0) continue;
+        // dezelfde functie met dezelfde tijden: samen in één regel (2× Bar in plaats van twee regels)
+        const zelfde = uit.find(x => x.functie === b.functie && x.start === b.start && x.eind === b.eind);
+        if (zelfde) zelfde.aantal += b.aantal; else uit.push(b);
+      }
+      return uit;
+    };
     // baas-instellingen per functie weer over de rijen verdelen
     const leesBez = bg => {
       const bez = leesBez0(bg), rest = {};
@@ -1737,6 +1749,17 @@
         bg.querySelector('.sluit').click(); await herlaad(); opnieuw(); eventModal(A.event(e.id));
         A.toast(k.checked ? `${f}: personeel mag je plek overnemen` : `${f}: je houdt deze plek zelf`, 'ok');
       });
+      // per plek een eigen regel (met de feesttijden alvast ingevuld), of weer samenvoegen
+      const pp = bg.querySelector('#ePerPlek');
+      pp.onchange = () => {
+        const fs = bg.querySelector('#eStart').value, fe = bg.querySelector('#eEind').value;
+        const rijen = leesBez0(bg), doos = bg.querySelector('#bezRijen'); let html = '', i = 0;
+        for (const b of rijen) {
+          if (pp.checked) for (let n = 0; n < b.aantal; n++) html += rijHtml({ functie: b.functie, aantal: 1, start: b.start || fs, eind: b.eind || fe }, i++);
+          else html += rijHtml(b, i++);
+        }
+        doos.innerHTML = html; koppel();
+      };
       bg.querySelector('#eRij').onclick = () => { bg.querySelector('#bezRijen').insertAdjacentHTML('beforeend', rijHtml({ functie: 'Bediening', aantal: 1 }, 0)); koppel(); };
       bg.querySelector('#eStandaard').onclick = () => { bg.querySelector('#bezRijen').innerHTML = standaardBezetting(bg.querySelector('#eGasten').value).map(rijHtml).join(''); koppel(); };
       if (nieuw) bg.querySelector('#eGasten').addEventListener('change', () => { if (!bg.querySelectorAll('.bez-rij').length) bg.querySelector('#eStandaard').click(); });
